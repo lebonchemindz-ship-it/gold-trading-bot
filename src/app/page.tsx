@@ -52,7 +52,10 @@ export default function GoldBotPage() {
   const autoTrainRef = useRef<Set<string>>(new Set()); // الأنماط التي دُرّبت هذه الجلسة
 
   // ---------- جلب الإشارة + الأخبار معاً (زر التحديث الرئيسي) ----------
+  const loadSeqRef = useRef(0);
+
   const load = useCallback(async (isManual = false, weightsOverride?: string) => {
+    const seq = ++loadSeqRef.current; // حارس ضد سباق الاستجابات القديمة
     if (isManual) setRefreshing(true);
     try {
       const w = weightsOverride ?? weightsParamRef.current;
@@ -62,24 +65,28 @@ export default function GoldBotPage() {
         fetch(`/api/news`, { cache: "no-store" }),
       ]);
       const sigJson = await sigRes.json();
-      if (sigJson.success) {
-        setSignal(sigJson.data as SignalResponse);
-        setError(null);
-        setLastUpdate(new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
-      } else {
-        throw new Error(sigJson.error ?? "فشل جلب التحليل");
+      if (seq === loadSeqRef.current) {
+        if (sigJson.success) {
+          setSignal(sigJson.data as SignalResponse);
+          setError(null);
+          setLastUpdate(new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+        } else {
+          throw new Error(sigJson.error ?? "فشل جلب التحليل");
+        }
       }
       const newsJson = await newsRes.json();
-      if (newsJson.success) {
+      if (seq === loadSeqRef.current && newsJson.success) {
         setNews(newsJson.data as NewsData);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "خطأ في الاتصال");
+      if (seq === loadSeqRef.current) setError(e instanceof Error ? e.message : "خطأ في الاتصال");
     } finally {
-      setLoading(false);
-      setNewsLoading(false);
-      setRefreshing(false);
-      setCountdown(REFRESH_INTERVAL);
+      if (seq === loadSeqRef.current) {
+        setLoading(false);
+        setNewsLoading(false);
+        setRefreshing(false);
+        setCountdown(REFRESH_INTERVAL);
+      }
     }
   }, []);
 
