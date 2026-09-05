@@ -223,6 +223,27 @@ export interface SignalResponse {
   dxyBias: number;
   silverBias: number;
   dataSource: string;
+  training: TrainingInfo; // حالة تعلّم البوت من الباك-تيست
+}
+
+// ---------- التدريب الذاتي (Backtest Learning) ----------
+export interface TrainingStats {
+  winRate: number; // 0..1 نسبة الفوز المركّبة
+  trades: number;
+  profitFactor: number;
+  expectancyR: number; // متوسط العائد بوحدات المخاطرة
+  maxDrawdownR: number;
+  tf: string; // إطار التدريب
+  from: string; // بداية فترة التدريب
+  to: string; // نهاية فترة التدريب
+  updatedAt: string;
+}
+
+export interface TrainingInfo {
+  applied: boolean;
+  source: "base" | "backtest";
+  stats: TrainingStats | null;
+  note: string | null; // وصف عربي للتعلّم المطبق
 }
 
 // ---------- أخطاء ----------

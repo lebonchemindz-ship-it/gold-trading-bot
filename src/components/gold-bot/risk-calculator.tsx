@@ -82,10 +82,10 @@ export function RiskCalculator({ entry, sl }: { entry: number | null; sl: number
 
         {result ? (
           <div className="grid grid-cols-2 gap-2 text-center">
-            <StatBox label="حجم اللوت الموصى به" value={result.lots} unit="لوت" highlight />
+            <StatBox label="حجم اللوت الموصى به" value={String(result.lots)} unit="لوت" highlight />
             <StatBox label="مبلغ المخاطرة" value={`${result.riskAmount}$`} unit={`(${riskPct}%)`} />
             <StatBox label="مسافة الوقف" value={`${result.riskUsd}$`} unit={`≈ ${result.pips} نقطة`} />
-            <StatBox label="أونصات" value={result.ounces} unit="oz" />
+            <StatBox label="أونصات" value={String(result.ounces)} unit="oz" />
             <div className="col-span-2 text-[11px] text-zinc-500 leading-relaxed bg-zinc-900/70 rounded-lg border border-zinc-800 px-3 py-2">
               المعادلة: اللوت = (الحساب × نسبة المخاطرة) ÷ (مسافة الوقف بالدولار × 100$). خسارة اللوت الواحد إذا
               ضُرب الوقف = <span dir="ltr">{result.lossPerLot}$</span>. لا تتجاوز 2% لكل صفقة أبداً — قاعدة

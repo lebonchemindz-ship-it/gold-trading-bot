@@ -19,6 +19,7 @@ import { aggregateTo4h, fetchCandles, fetchNews } from "./market";
 import { computeAsianRange, computeSRLevels, fibonacciLevels, findSwings, pivotPoints } from "./structure";
 import { computePillars, computeQualityGate, type PillarContext } from "./scoring";
 import { getSessionInfo } from "./sessions";
+import { getLearnedState, BASE_PILLAR_WEIGHTS, PILLAR_KEYS } from "./learning";
 import type {
   Candle,
   Direction,
@@ -102,8 +103,10 @@ function buildTFRows(all: TimeframeAnalysis[]): TFRow[] {
       if (e50 > e200) bull += 2;
       else bear += 2;
     }
-    if (tfa.price > e50) bull += 1;
-    else bear += 1;
+    if (e50 != null) {
+      if (tfa.price > e50) bull += 1;
+      else bear += 1;
+    }
     if (tfa.rsi.rsi > 52) bull += 1;
     else if (tfa.rsi.rsi < 48) bear += 1;
     if (tfa.macd.hist > 0) bull += 1;
@@ -204,7 +207,11 @@ function buildTradeLevels(
 }
 
 // ---------- الثقة والدالة الرئيسية ----------
-export async function generateSignal(mode: TradeMode): Promise<SignalResponse> {
+// weightsOverride: أوزان أعمدة قادمة من الباك-تيست (تعلّم ذاتي)
+export async function generateSignal(
+  mode: TradeMode,
+  weightsOverride?: Record<string, number> | null
+): Promise<SignalResponse> {
   // 1) جلب البيانات (متوازٍ)
   const [c5, c15, c60, c1d, dxy, silver, news] = await Promise.all([
     fetchCandles("GC=F", "5m", "5d").catch(() => null),
@@ -284,6 +291,32 @@ export async function generateSignal(mode: TradeMode): Promise<SignalResponse> {
   const pillars: PillarScore[] = computePillars(ctx);
   const gate = computeQualityGate(ctx, pillars);
 
+  // 7.5) تطبيق أوزان التعلّم الذاتي (من الباك-تيست) إن وُجدت
+  let training: SignalResponse["training"] = { applied: false, source: "base", stats: null, note: null };
+  const weights =
+    weightsOverride ??
+    (getLearnedState() && mode === (getLearnedState()!.tf === "1h" ? "day" : "scalping")
+      ? getLearnedState()!.weights
+      : null);
+  if (weights) {
+    const valid = PILLAR_KEYS.every((k) => weights[k] != null && !isNaN(weights[k]) && weights[k] >= 3);
+    if (valid) {
+      for (const p of pillars) {
+        const w = weights[p.key];
+        if (w != null) p.weight = Math.round(w * 10) / 10;
+      }
+      const st = getLearnedState()?.stats ?? null;
+      training = {
+        applied: true,
+        source: "backtest",
+        stats: st,
+        note:
+          `تم تعديل أوزان الأعمدة تلقائياً وفق أداء التدريب على ${st?.trades ?? 0} صفقة تاريخية ` +
+          `(نسبة فوز ${st ? Math.round(st.winRate * 100) : 0}% على إطار ${st?.tf ?? ""}) — الأوزان الأساسية تُستخدم عند غياب التعلّم`,
+      };
+    }
+  }
+
   // 8) الدرجة النهائية الموزونة
   const totalWeight = pillars.reduce((a, p) => a + p.weight, 0);
   const score = pillars.reduce((a, p) => a + p.score * p.weight, 0) / totalWeight;
@@ -300,7 +333,7 @@ export async function generateSignal(mode: TradeMode): Promise<SignalResponse> {
   // 10) مستويات الصفقة
   const levels =
     actionable && (mode === "scalping" ? entry.atr.atr : entry.atr.atr) > 0
-      ? buildTradeLevels(direction, price, entry.atr.atr, entry.candles, sr.supports, sr.resistances)
+      ? buildTradeLevels(direction as "BUY" | "SELL", price, entry.atr.atr, entry.candles, sr.supports, sr.resistances)
       : null;
 
   // 11) وسم الثقة
@@ -355,6 +388,20 @@ export async function generateSignal(mode: TradeMode): Promise<SignalResponse> {
     narrative.push("الإشارات غير كافية لدخول آمن الآن — الوقوف جانباً حتى تكتمل الشروط هو قرار تداول صحيح.");
   }
   if (cautionText) narrative.push(cautionText);
+  if (training.applied) {
+    const st = training.stats;
+    narrative.push(
+      st
+        ? `🧠 التعلّم الذاتي مفعّل: الأوزان مقاسة من ${st.trades} صفقة تدريب (فوز ${Math.round(
+            st.winRate * 100
+          )}%، عامل ربح ${st.profitFactor}) — التدريب يجري بدون نظرة مستقبلية على الشموع السابقة.`
+        : "🧠 التعلّم الذاتي مفعّل: أوزان الأعمدة معايرة من نتائج التدريب على الشموع التاريخية (التفاصيل في لوحة التدريب الذاتي أدناه)."
+    );
+  } else {
+    narrative.push(
+      "الأوزان الحالية هي الأساسية (24/20/14/12/10/10/10) — شغّل لوحة التدريب الذاتي ليعيد البوت معايرة أوزانه على الشموع التاريخية."
+    );
+  }
 
   // 14) بصمة حتمية (إثبات عدم العشوائية)
   const fingerprint = createHash("sha256")
@@ -365,6 +412,7 @@ export async function generateSignal(mode: TradeMode): Promise<SignalResponse> {
         dxy: dxyBias,
         si: silverBias,
         n: upcoming.length + recent.length,
+        w: training.applied ? PILLAR_KEYS.map((k) => (weights ?? BASE_PILLAR_WEIGHTS)[k]).join("/") : "base",
       })
     )
     .digest("hex")
@@ -410,6 +458,7 @@ export async function generateSignal(mode: TradeMode): Promise<SignalResponse> {
     dxyBias: Math.round(dxyBias),
     silverBias: Math.round(silverBias),
     dataSource: "Yahoo Finance (GC=F) + ForexFactory Calendar",
+    training,
   };
 }
 

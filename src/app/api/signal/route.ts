@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { generateSignal } from "@/lib/engine/signal";
+import { parseWeightsParam } from "@/lib/engine/learning";
 import type { TradeMode } from "@/lib/engine/types";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +12,11 @@ export async function GET(request: Request) {
     const modeParam = url.searchParams.get("mode") ?? "scalping";
     const mode: TradeMode = modeParam === "day" ? "day" : "scalping";
 
-    const signal = await generateSignal(mode);
+    // أوزان التعلّم الذاتي القادمة من الباك-تيست (اختياري)
+    const wParam = url.searchParams.get("w");
+    const weights = wParam ? parseWeightsParam(wParam) : null;
+
+    const signal = await generateSignal(mode, weights);
     return NextResponse.json(
       { success: true, data: signal },
       { headers: { "Cache-Control": "no-store, max-age=0" } }
