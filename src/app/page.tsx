@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { RefreshCw, Radio, TrendingUp, TrendingDown, Coins, AlertTriangle, Github, Globe, BrainCircuit } from "lucide-react";
+import { RefreshCw, Radio, TrendingUp, TrendingDown, Coins, AlertTriangle, Github, Globe, BrainCircuit, GraduationCap } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -17,9 +17,11 @@ import { TradingViewChart, TradingViewTechnicalGauge } from "@/components/gold-b
 import { MarketClock } from "@/components/gold-bot/market-clock";
 import { NewsPanel, type NewsData } from "@/components/gold-bot/news-panel";
 import { BacktestPanel } from "@/components/gold-bot/backtest-panel";
+import { TrainerPanel } from "@/components/gold-bot/trainer-panel";
 import { getSessionInfo } from "@/lib/engine/sessions";
 import type { SignalResponse, SessionInfo } from "@/lib/engine/types";
 import type { BacktestResult } from "@/lib/engine/backtest";
+import type { SelfTrainingResult } from "@/lib/engine/selftrainer";
 import { cn } from "@/lib/utils";
 
 const REFRESH_INTERVAL = 60; // ثانية
@@ -40,7 +42,11 @@ export default function GoldBotPage() {
   const [countdown, setCountdown] = useState(REFRESH_INTERVAL);
   const [lastUpdate, setLastUpdate] = useState<string>("");
 
-  // حالة التدريب الذاتي
+  // حالة التدريب الذاتي العميق (6 أشهر)
+  const [trainData, setTrainData] = useState<SelfTrainingResult | null>(null);
+  const [trainRunning, setTrainRunning] = useState(false);
+  const [trainError, setTrainError] = useState<string | null>(null);
+  // تقرير الباك-تيست الفني التفصيلي (اختياري — بالزر)
   const [btData, setBtData] = useState<BacktestResult | null>(null);
   const [btRunning, setBtRunning] = useState(false);
   const [btError, setBtError] = useState<string | null>(null);
@@ -90,21 +96,27 @@ export default function GoldBotPage() {
     }
   }, []);
 
-  // ---------- تشغيل التدريب الذاتي (خلفية أو بزر) ----------
+  // ---------- تشغيل التدريب الذاتي العميق (6 أشهر — تنبأ أعمى ← تحقق ← تفسير ← عدّل) ----------
   const runTraining = useCallback(
-    async (tf: "15m" | "1h", silent = false) => {
-      setBtRunning(true);
-      setBtError(null);
+    async (epochs: number, silent = false) => {
+      setTrainRunning(true);
+      setTrainError(null);
       try {
-        const res = await fetch(`/api/backtest?tf=${tf}`, { cache: "no-store" });
+        const res = await fetch(`/api/train?epochs=${epochs}`, { cache: "no-store" });
         const json = await res.json();
         if (!json.success) throw new Error(json.error ?? "فشل التدريب");
-        setBtData(json.data as BacktestResult);
+        const data = json.data as SelfTrainingResult;
+        setTrainData(data);
+        setTrainLevel({ label: data.trainingLevel.label, score: data.trainingLevel.score });
         const wp = json.weightsParam as string;
-        // حفظ الأوزان لكل نمط على حدة
+        // حفظ الأوزان المتعلمة لكل نمط + ملخص المستوى
         try {
           localStorage.setItem(`goldbot:weights:${modeRef.current}`, wp);
           localStorage.setItem(`goldbot:weights:ts:${modeRef.current}`, String(Date.now()));
+          localStorage.setItem(
+            `goldbot:level:${modeRef.current}`,
+            JSON.stringify({ label: data.trainingLevel.label, score: data.trainingLevel.score, epochs: data.epochsRun })
+          );
         } catch {
           /* تجاهل أخطاء التخزين */
         }
@@ -112,15 +124,43 @@ export default function GoldBotPage() {
         // إعادة جلب الإشارة بالأوزان المتعلمة الجديدة
         if (silent) await load(false, wp);
       } catch (e) {
-        setBtError(e instanceof Error ? e.message : "خطأ في التدريب");
+        setTrainError(e instanceof Error ? e.message : "خطأ في التدريب");
       } finally {
-        setBtRunning(false);
+        setTrainRunning(false);
       }
     },
     [load]
   );
 
+  // ---------- تشغيل تقرير الباك-تيست الفني التفصيلي (يدوي فقط) ----------
+  const runBacktest = useCallback(
+    async (tf: "15m" | "1h") => {
+      setBtRunning(true);
+      setBtError(null);
+      try {
+        const res = await fetch(`/api/backtest?tf=${tf}`, { cache: "no-store" });
+        const json = await res.json();
+        if (!json.success) throw new Error(json.error ?? "فشل التقرير");
+        setBtData(json.data as BacktestResult);
+        const wp = json.weightsParam as string;
+        try {
+          localStorage.setItem(`goldbot:weights:${modeRef.current}`, wp);
+          localStorage.setItem(`goldbot:weights:ts:${modeRef.current}`, String(Date.now()));
+        } catch {
+          /* تجاهل */
+        }
+        weightsParamRef.current = wp;
+      } catch (e) {
+        setBtError(e instanceof Error ? e.message : "خطأ في التقرير");
+      } finally {
+        setBtRunning(false);
+      }
+    },
+    []
+  );
+
   // ---------- التحميل الأولي + عند تغيير النمط ----------
+  const [trainLevel, setTrainLevel] = useState<{ label: string; score: number } | null>(null);
   useEffect(() => {
     setLoading(true);
     // أوزان محفوظة لنمط حالي؟
@@ -130,6 +170,13 @@ export default function GoldBotPage() {
       saved = localStorage.getItem(`goldbot:weights:${mode}`);
       const ts = Number(localStorage.getItem(`goldbot:weights:ts:${mode}`) ?? 0);
       fresh = !!saved && Date.now() - ts < WEIGHTS_TTL;
+      const lvlRaw = localStorage.getItem(`goldbot:level:${mode}`);
+      if (lvlRaw) {
+        const lvl = JSON.parse(lvlRaw) as { label: string; score: number };
+        setTrainLevel(lvl);
+      } else {
+        setTrainLevel(null);
+      }
     } catch {
       /* localStorage غير متاح */
     }
@@ -137,9 +184,9 @@ export default function GoldBotPage() {
 
     load();
     autoTrainRef.current.add(mode);
-    // تدريب تلقائي إن لم تكن هناك أوزان حديثة لهذا النمط
+    // تدريب عميق تلقائي إن لم تكن هناك أوزان حديثة لهذا النمط
     if (!fresh) {
-      runTraining(tfOf(mode), true);
+      runTraining(4, true);
     }
   }, [mode, load, runTraining]);
 
@@ -173,6 +220,7 @@ export default function GoldBotPage() {
   const up = changePct >= 0;
   const trainingApplied = signal?.training?.applied ?? false;
   const stripSession = liveSession ?? signal?.session ?? null;
+  void tfOf;
 
   return (
     <div className="min-h-screen flex flex-col bg-[#09090b]">
@@ -237,6 +285,15 @@ export default function GoldBotPage() {
                 >
                   <BrainCircuit className="w-3 h-3" />
                   أوزان متعلمة
+                </Badge>
+              )}
+              {trainLevel && (
+                <Badge
+                  variant="outline"
+                  className="hidden md:inline-flex text-[9px] border-amber-500/40 bg-amber-500/10 text-amber-300 gap-1"
+                >
+                  <GraduationCap className="w-3 h-3" />
+                  {trainLevel.label}
                 </Badge>
               )}
               <span className="text-[10px] text-zinc-600 tabular-nums hidden sm:inline">
@@ -393,13 +450,24 @@ export default function GoldBotPage() {
                     <TradingViewTechnicalGauge />
                   </div>
 
-                  {/* لوحة التدريب الذاتي */}
+                  {/* لوحة التدريب الذاتي العميق — 6 أشهر */}
+                  <div className="mt-5">
+                    <TrainerPanel
+                      result={trainData}
+                      running={trainRunning}
+                      error={trainError}
+                      onRun={(epochs) => runTraining(epochs, false)}
+                      applied={trainingApplied}
+                    />
+                  </div>
+
+                  {/* تقرير الباك-تيست الفني التفصيلي (اختياري) */}
                   <div className="mt-5">
                     <BacktestPanel
                       result={btData}
                       running={btRunning}
                       error={btError}
-                      onRun={(tf) => runTraining(tf, false)}
+                      onRun={(tf) => runBacktest(tf)}
                       mode={mode}
                       applied={trainingApplied}
                     />

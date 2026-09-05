@@ -1,0 +1,924 @@
+     1→// ============================================================
+     2→// محرك التدريب الذاتي — Walk-Forward Backtest
+     3→// البروتوكول (كما طلبه المستخدم):
+     4→//   1) البوت "يجرب" كل استراتيجية على شمعة تاريخية C(i)
+     5→//      باستخدام بيانات C(0..i) فقط — لا يمكنه رؤية النتيجة
+     6→//   2) الدخول على افتتاح الشمعة التالية C(i+1) — بلا نظرة مستقبلية
+     7→//   3) بعدها "يتأكد": هل ضرب الهدف أم الوقف؟ (بأولوية الوقف — متحفظ)
+     8→//   4) يقوّي استراتيجيته: أوزان الأعمدة تُعدّل وفق Wilson bound
+     9→//   5) اختبار إسقاطي صادق: يتعلم على أول 70% ويُختبر على آخر 30%
+    10→//      (الفترة الأخيرة لم يرها إطلاقاً أثناء التعلم)
+    11→// كل المؤشرات المستخدمة سببية (causal): قيمتها عند i تعتمد فقط
+    12→// على الشموع 0..i — إعادة حسابها على الشرائح تعطي نفس النتيجة
+    13→// ============================================================
+    14→
+    15→import { fetchCandles } from "./market";
+    16→import { computeEMASet, rsi, macd, bollinger, atr } from "./indicators";
+    17→import { BASE_PILLAR_WEIGHTS, PILLAR_KEYS, setLearnedState } from "./learning";
+    18→import type { Candle } from "./types";
+    19→
+    20→// ---------- الأنواع العامة ----------
+    21→export interface BtStats {
+    22→  trades: number;
+    23→  wins: number;
+    24→  losses: number;
+    25→  timeouts: number;
+    26→  winRate: number; // 0..1
+    27→  avgR: number;
+    28→  grossR: number;
+    29→  profitFactor: number;
+    30→  expectancyR: number;
+    31→  maxDrawdownR: number;
+    32→  bestStreak: number;
+    33→  worstStreak: number;
+    34→}
+    35→
+    36→export interface BtStrategy {
+    37→  key: string;
+    38→  nameAr: string;
+    39→  pillar: string;
+    40→  pillarAr: string;
+    41→  trades: number;
+    42→  wins: number;
+    43→  losses: number;
+    44→  timeouts: number;
+    45→  winRate: number;
+    46→  wilson: number;
+    47→  avgR: number;
+    48→  profitFactor: number;
+    49→  multiplier: number; // عامل التعلم 0.55..1.45
+    50→  grossR: number;
+    51→}
+    52→
+    53→export interface BtTrade {
+    54→  t: number; // وقت الإشارة (إغلاق الشمعة)
+    55→  entryT: number;
+    56→  dir: "BUY" | "SELL";
+    57→  strategies: string[]; // الاستراتيجيات المتفقة
+    58→  entry: number;
+    59→  sl: number;
+    60→  tp1: number;
+    61→  result: "win" | "loss" | "timeout";
+    62→  r: number;
+    63→  bars: number;
+    64→}
+    65→
+    66→export interface BtMonth {
+    67→  ym: string; // 2025-08
+    68→  label: string; // أغسطس 2025
+    69→  open: number;
+    70→  high: number;
+    71→  low: number;
+    72→  close: number;
+    73→  changePct: number;
+    74→  atrAvg: number;
+    75→  trades: number;
+    76→  wins: number;
+    77→  wr: number;
+    78→  dominant: "BUY" | "SELL" | "متوازن";
+    79→}
+    80→
+    81→export interface BacktestResult {
+    82→  tf: "15m" | "1h";
+    83→  generatedAt: string;
+    84→  dataSource: string;
+    85→  candlesTested: number;
+    86→  from: string;
+    87→  to: string;
+    88→  holdBars: number;
+    89→  warmup: number;
+    90→  splitIdx: number;
+    91→  trainFrom: string;
+    92→  testFrom: string;
+    93→  // فترة الاختبار الإسقاطي (آخر 30%): قبل التدريب مقابل بعده
+    94→  statsBefore: BtStats; // أوزان متساوية
+    95→  statsAfter: BtStats; // أوزان متعلمة من فترة التدريب
+    96→  statsTrain: BtStats; // أداء التعلم داخل عينة التدريب
+    97→  equity: number[]; // منحنى R التراكمي (بعد التعلم — فترة الاختبار)
+    98→  equityBefore: number[];
+    99→  strategies: BtStrategy[];
+   100→  trades: BtTrade[]; // آخر صفقات التوليفة (كامل الفترة)
+   101→  months: BtMonth[];
+   102→  weights: {
+   103→    base: Record<string, number>;
+   104→    learnedLive: Record<string, number>; // للتطبيق المباشر (تعلم كامل الفترة)
+   105→    learnedTest: Record<string, number>; // المُستخدمة في الاختبار الإسقاطي
+   106→  };
+   107→  notes: string[];
+   108→}
+   109→
+   110→// ---------- ثوابت ----------
+   111→const WARMUP = 210; // EMA200 + متوسطات BB/ATR
+   112→const AR_MONTHS = [
+   113→  "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+   114→  "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر",
+   115→];
+   116→
+   117→const STRATEGY_META: { key: string; nameAr: string; pillar: string; pillarAr: string }[] = [
+   118→  { key: "ema_trend", nameAr: "اتجاه EMA المتعدد (9>21>50)", pillar: "trend", pillarAr: "الاتجاه" },
+   119→  { key: "bb_break", nameAr: "كسر انضغاط بولينجر", pillar: "trend", pillarAr: "الاتجاه" },
+   120→  { key: "macd_cross", nameAr: "تقاطع MACD مع الفلتر", pillar: "momentum", pillarAr: "الزخم" },
+   121→  { key: "rsi_reversal", nameAr: "انعكاس RSI المتطرف", pillar: "momentum", pillarAr: "الزخم" },
+   122→  { key: "bb_reversal", nameAr: "ارتداد بولينجر + RSI", pillar: "momentum", pillarAr: "الزخم" },
+   123→  { key: "sr_bounce", nameAr: "ارتداد دعم/مقاومة ديناميكي", pillar: "location", pillarAr: "الموقع" },
+   124→  { key: "smc_sweep", nameAr: "كنس سيولة + استعادة (SMC)", pillar: "location", pillarAr: "الموقع" },
+   125→  { key: "pattern_play", nameAr: "أنماط الشموع اليابانية", pillar: "priceAction", pillarAr: "حركة السعر" },
+   126→  { key: "asian_breakout", nameAr: "كسر النطاق الآسيوي", pillar: "session", pillarAr: "الجلسة" },
+   127→];
+   128→
+   129→// ---------- أدوات ----------
+   130→const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+   131→
+   132→function wilsonLower(wins: number, n: number, z = 1.96): number {
+   133→  if (n <= 0) return 0;
+   134→  const p = wins / n;
+   135→  const denom = 1 + (z * z) / n;
+   136→  const center = p + (z * z) / (2 * n);
+   137→  const spread = z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n));
+   138→  return Math.max(0, (center - spread) / denom);
+   139→}
+   140→
+   141→interface RawTrade {
+   142→  key: string;
+   143→  i: number; // شمعة الإشارة
+   144→  t: number;
+   145→  entryT: number;
+   146→  dir: 1 | -1;
+   147→  entry: number;
+   148→  sl: number;
+   149→  tp1: number;
+   150→  result: "win" | "loss" | "timeout";
+   151→  r: number;
+   152→  bars: number;
+   153→  endIdx: number;
+   154→}
+   155→
+   156→function statsOf(trades: RawTrade[]): BtStats {
+   157→  const wins = trades.filter((t) => t.result === "win");
+   158→  const losses = trades.filter((t) => t.result === "loss");
+   159→  const timeouts = trades.filter((t) => t.result === "timeout");
+   160→  const grossR = trades.reduce((a, t) => a + t.r, 0);
+   161→  const posR = trades.filter((t) => t.r > 0).reduce((a, t) => a + t.r, 0);
+   162→  const negR = Math.abs(trades.filter((t) => t.r < 0).reduce((a, t) => a + t.r, 0));
+   163→
+   164→  // أقصى تراجع تراكمي
+   165→  let cum = 0;
+   166→  let peak = 0;
+   167→  let maxDd = 0;
+   168→  for (const t of trades) {
+   169→    cum += t.r;
+   170→    peak = Math.max(peak, cum);
+   171→    maxDd = Math.max(maxDd, peak - cum);
+   172→  }
+   173→
+   174→  // السلاسل
+   175→  let best = 0;
+   176→  let worst = 0;
+   177→  let curW = 0;
+   178→  let curL = 0;
+   179→  for (const t of trades) {
+   180→    if (t.result === "win") {
+   181→      curW++;
+   182→      curL = 0;
+   183→    } else {
+   184→      curL++;
+   185→      curW = 0;
+   186→    }
+   187→    best = Math.max(best, curW);
+   188→    worst = Math.max(worst, curL);
+   189→  }
+   190→
+   191→  const n = trades.length;
+   192→  return {
+   193→    trades: n,
+   194→    wins: wins.length,
+   195→    losses: losses.length,
+   196→    timeouts: timeouts.length,
+   197→    winRate: n ? wins.length / n : 0,
+   198→    avgR: n ? grossR / n : 0,
+   199→    grossR: Math.round(grossR * 100) / 100,
+   200→    profitFactor: negR > 0 ? Math.round((posR / negR) * 100) / 100 : posR > 0 ? 99 : 0,
+   201→    expectancyR: n ? Math.round((grossR / n) * 1000) / 1000 : 0,
+   202→    maxDrawdownR: Math.round(maxDd * 100) / 100,
+   203→    bestStreak: best,
+   204→    worstStreak: worst,
+   205→  };
+   206→}
+   207→
+   208→/** محاكاة النتيجة — الوقف له الأولوية داخل الشمعة (متحفظ) */
+   209→function simulate(
+   210→  candles: Candle[],
+   211→  i: number,
+   212→  dir: 1 | -1,
+   213→  sl: number,
+   214→  hold: number
+   215→): { result: "win" | "loss" | "timeout"; r: number; bars: number; endIdx: number } | null {
+   216→  const next = candles[i + 1];
+   217→  if (!next) return null;
+   218→  const entry = next.o;
+   219→  const risk = Math.abs(entry - sl);
+   220→  if (risk < 0.3) return null; // وقف غير منطقي — تجاهل
+   221→  const tp1 = entry + dir * risk;
+   222→
+   223→  const last = Math.min(i + hold, candles.length - 1);
+   224→  for (let j = i + 1; j <= last; j++) {
+   225→    const c = candles[j];
+   226→    if (dir === 1) {
+   227→      if (c.l <= sl) return { result: "loss", r: -1, bars: j - i, endIdx: j };
+   228→      if (c.h >= tp1) return { result: "win", r: 1, bars: j - i, endIdx: j };
+   229→    } else {
+   230→      if (c.h >= sl) return { result: "loss", r: -1, bars: j - i, endIdx: j };
+   231→      if (c.l <= tp1) return { result: "win", r: 1, bars: j - i, endIdx: j };
+   232→    }
+   233→  }
+   234→  const exit = candles[last].c;
+   235→  const r = ((exit - entry) * dir) / risk;
+   236→  return { result: "timeout", r: Math.round(r * 100) / 100, bars: last - i, endIdx: last };
+   237→}
+   238→
+   239→// ---------- بنية اليوم UTC ----------
+   240→interface DayInfo {
+   241→  idx: number; // تسلسل
+   242→  key: string;
+   243→  high: number;
+   244→  low: number;
+   245→  asianHigh: number;
+   246→  asianLow: number;
+   247→  asianCount: number;
+   248→  firstIdx: number;
+   249→  lastIdx: number;
+   250→}
+   251→
+   252→function buildDays(candles: Candle[]): { days: DayInfo[]; dayOf: number[] } {
+   253→  const days: DayInfo[] = [];
+   254→  const dayOf: number[] = new Array(candles.length).fill(-1);
+   255→  const map = new Map<string, DayInfo>();
+   256→
+   257→  for (let i = 0; i < candles.length; i++) {
+   258→    const d = new Date(candles[i].t);
+   259→    const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+   260→    let info = map.get(key);
+   261→    if (!info) {
+   262→      info = {
+   263→        idx: days.length,
+   264→        key,
+   265→        high: -Infinity,
+   266→        low: Infinity,
+   267→        asianHigh: -Infinity,
+   268→        asianLow: Infinity,
+   269→        asianCount: 0,
+   270→        firstIdx: i,
+   271→        lastIdx: i,
+   272→      };
+   273→      map.set(key, info);
+   274→      days.push(info);
+   275→    }
+   276→    info.high = Math.max(info.high, candles[i].h);
+   277→    info.low = Math.min(info.low, candles[i].l);
+   278→    info.lastIdx = i;
+   279→    const h = d.getUTCHours();
+   280→    if (h < 8) {
+   281→      info.asianHigh = Math.max(info.asianHigh, candles[i].h);
+   282→      info.asianLow = Math.min(info.asianLow, candles[i].l);
+   283→      info.asianCount++;
+   284→    }
+   285→    dayOf[i] = info.idx;
+   286→  }
+   287→  return { days, dayOf };
+   288→}
+   289→
+   290→// ---------- التقييم عند كل شمعة (كل الاستراتيجيات) ----------
+   291→interface Vote {
+   292→  key: string;
+   293→  dir: 1 | -1;
+   294→  sl: number; // قيمة الوقف المطلقة
+   295→}
+   296→
+   297→interface Ctx {
+   298→  candles: Candle[];
+   299→  closes: number[];
+   300→  ema9: number[];
+   301→  ema21: number[];
+   302→  ema50: number[];
+   303→  ema200: number[];
+   304→  rsiArr: number[];
+   305→  macdLine: number[];
+   306→  macdSignal: number[];
+   307→  macdHist: number[];
+   308→  bbUpper: number[];
+   309→  bbLower: number[];
+   310→  bw: number[];
+   311→  bwAvg: number[];
+   312→  atrArr: number[];
+   313→  adxArr: number[];
+   314→  days: DayInfo[];
+   315→  dayOf: number[];
+   316→}
+   317→
+   318→function evaluateAt(ctx: Ctx, i: number): Vote[] {
+   319→  const votes: Vote[] = [];
+   320→  const { candles, closes } = ctx;
+   321→  const c = candles[i];
+   322→  const p = candles[i - 1];
+   323→  const a = ctx.atrArr[i];
+   324→  if (!a || a < 0.3 || isNaN(a)) return votes;
+   325→
+   326→  const body = Math.abs(c.c - c.o);
+   327→  const e9 = ctx.ema9[i];
+   328→  const e21 = ctx.ema21[i];
+   329→  const e50 = ctx.ema50[i];
+   330→  const e200 = ctx.ema200[i];
+   331→  const rsiNow = ctx.rsiArr[i];
+   332→  const rsiPrev = ctx.rsiArr[i - 1];
+   333→
+   334→  const ok = (...vals: number[]) => vals.every((v) => v != null && !isNaN(v));
+   335→
+   336→  // 1) ema_trend: ترتيب كامل + ADX ≥ 20
+   337→  if (ok(e9, e21, e50, ctx.adxArr[i]) && ctx.adxArr[i] >= 20) {
+   338→    if (e9 > e21 && e21 > e50 && c.c > e9) votes.push({ key: "ema_trend", dir: 1, sl: c.c - 1.5 * a });
+   339→    if (e9 < e21 && e21 < e50 && c.c < e9) votes.push({ key: "ema_trend", dir: -1, sl: c.c + 1.5 * a });
+   340→  }
+   341→
+   342→  // 2) macd_cross: تقاطع خلال آخر شمعتين + اتجاه EMA50
+   343→  const ml = ctx.macdLine[i];
+   344→  const ms = ctx.macdSignal[i];
+   345→  const mlP = ctx.macdLine[i - 1];
+   346→  const msP = ctx.macdSignal[i - 1];
+   347→  if (ok(ml, ms, mlP, msP, e50)) {
+   348→    if (ml > ms && mlP <= msP && c.c > e50) votes.push({ key: "macd_cross", dir: 1, sl: c.c - 1.5 * a });
+   349→    if (ml < ms && mlP >= msP && c.c < e50) votes.push({ key: "macd_cross", dir: -1, sl: c.c + 1.5 * a });
+   350→  }
+   351→
+   352→  // 3) bb_break: انضغاط سابق + إغلاق خارج الشريط بجسم قوي
+   353→  const bwNow = ctx.bw[i];
+   354→  const bwAvgNow = ctx.bwAvg[i];
+   355→  const squeezePrev = ok(ctx.bw[i - 1], ctx.bwAvg[i - 1]) && ctx.bw[i - 1] < 0.8 * ctx.bwAvg[i - 1];
+   356→  if (squeezePrev && ok(ctx.bbUpper[i], ctx.bbLower[i]) && body > 0.5 * a) {
+   357→    if (c.c > ctx.bbUpper[i]) votes.push({ key: "bb_break", dir: 1, sl: c.c - 1.5 * a });
+   358→    if (c.c < ctx.bbLower[i]) votes.push({ key: "bb_break", dir: -1, sl: c.c + 1.5 * a });
+   359→  }
+   360→  void bwNow;
+   361→  void bwAvgNow;
+   362→
+   363→  // 4) rsi_reversal: خروج من التطرف + مع EMA200
+   364→  if (ok(rsiNow, rsiPrev, e200)) {
+   365→    if (rsiPrev < 32 && rsiNow > rsiPrev && c.c > e200)
+   366→      votes.push({ key: "rsi_reversal", dir: 1, sl: c.c - 1.5 * a });
+   367→    if (rsiPrev > 68 && rsiNow < rsiPrev && c.c < e200)
+   368→      votes.push({ key: "rsi_reversal", dir: -1, sl: c.c + 1.5 * a });
+   369→  }
+   370→
+   371→  // 5) bb_reversal: اختراق الشريط ثم عودة داخلية + RSI
+   372→  const up = ctx.bbUpper[i];
+   373→  const lo = ctx.bbLower[i];
+   374→  const upP = ctx.bbUpper[i - 1];
+   375→  const loP = ctx.bbLower[i - 1];
+   376→  if (ok(up, lo, upP, loP, rsiNow)) {
+   377→    if (p.l < loP && c.c > lo && rsiNow < 42)
+   378→      votes.push({ key: "bb_reversal", dir: 1, sl: c.c - 1.5 * a });
+   379→    if (p.h > upP && c.c < up && rsiNow > 58)
+   380→      votes.push({ key: "bb_reversal", dir: -1, sl: c.c + 1.5 * a });
+   381→  }
+   382→
+   383→  // 6) sr_bounce: دعم/مقاومة ديناميكي (آخر 12 شمعة سابقة)
+   384→  let support = Infinity;
+   385→  let resistance = -Infinity;
+   386→  for (let j = i - 12; j < i; j++) {
+   387→    if (j < 0) continue;
+   388→    support = Math.min(support, candles[j].l);
+   389→    resistance = Math.max(resistance, candles[j].h);
+   390→  }
+   391→  if (ok(support, resistance) && isFinite(support) && isFinite(resistance)) {
+   392→    if (c.l <= support + 0.25 * a && c.c > c.o && c.c > support)
+   393→      votes.push({ key: "sr_bounce", dir: 1, sl: c.c - 1.2 * a });
+   394→    if (c.h >= resistance - 0.25 * a && c.c < c.o && c.c < resistance)
+   395→      votes.push({ key: "sr_bounce", dir: -1, sl: c.c + 1.2 * a });
+   396→  }
+   397→
+   398→  // 7) smc_sweep: كنس قاع/قمة اليوم السابق ثم استعادة
+   399→  const dayIdx = ctx.dayOf[i];
+   400→  if (dayIdx >= 1) {
+   401→    const prevDay = ctx.days[dayIdx - 1];
+   402→    if (prevDay && prevDay.lastIdx < i) {
+   403→      if (c.l < prevDay.low && c.c > prevDay.low && c.c > c.o) {
+   404→        const slDist = clamp(c.c - c.l + 0.25 * a, 0.8 * a, 2.5 * a);
+   405→        votes.push({ key: "smc_sweep", dir: 1, sl: c.c - slDist });
+   406→      }
+   407→      if (c.h > prevDay.high && c.c < prevDay.high && c.c < c.o) {
+   408→        const slDist = clamp(c.h - c.c + 0.25 * a, 0.8 * a, 2.5 * a);
+   409→        votes.push({ key: "smc_sweep", dir: -1, sl: c.c + slDist });
+   410→      }
+   411→    }
+   412→  }
+   413→
+   414→  // 8) pattern_play: ابتلاع/مطرقة/شهاب مع فلتر EMA200
+   415→  const bodyP = c.h - c.l > 0 ? body / (c.h - c.l) : 0;
+   416→  const upperWick = c.h - Math.max(c.c, c.o);
+   417→  const lowerWick = Math.min(c.c, c.o) - c.l;
+   418→  const prevBody = Math.abs(p.c - p.o);
+   419→  if (ok(e200) && c.h - c.l > 0) {
+   420→    const bullEngulf = p.c < p.o && c.c > c.o && c.c >= p.o && c.o <= p.c && body > prevBody;
+   421→    const bearEngulf = p.c > p.o && c.c < c.o && c.o >= p.c && c.c <= p.o && body > prevBody;
+   422→    const hammer = lowerWick > body * 2 && upperWick < body * 0.8 && bodyP < 0.45;
+   423→    const star = upperWick > body * 2 && lowerWick < body * 0.8 && bodyP < 0.45;
+   424→    if ((bullEngulf || (hammer && c.c > c.o)) && c.c > e200)
+   425→      votes.push({ key: "pattern_play", dir: 1, sl: c.c - 1.2 * a });
+   426→    if ((bearEngulf || (star && c.c < c.o)) && c.c < e200)
+   427→      votes.push({ key: "pattern_play", dir: -1, sl: c.c + 1.2 * a });
+   428→  }
+   429→
+   430→  // 9) asian_breakout: كسر نطاق آسيوي بعد 07:00 UTC
+   431→  const dayInfo = ctx.days[dayIdx];
+   432→  const hourUtc = new Date(c.t).getUTCHours();
+   433→  if (dayInfo && dayInfo.asianCount >= 4 && hourUtc >= 7 && isFinite(dayInfo.asianHigh) && isFinite(dayInfo.asianLow)) {
+   434→    const rangeWidth = dayInfo.asianHigh - dayInfo.asianLow;
+   435→    const onlyAfterLondon = hourUtc >= 7 && hourUtc <= 16; // نافذة لندن فقط
+   436→    if (onlyAfterLondon && body > 0.6 * a) {
+   437→      if (c.c > dayInfo.asianHigh) {
+   438→        const slDist = Math.max(1.0 * a, rangeWidth * 0.5);
+   439→        votes.push({ key: "asian_breakout", dir: 1, sl: c.c - slDist });
+   440→      }
+   441→      if (c.c < dayInfo.asianLow) {
+   442→        const slDist = Math.max(1.0 * a, rangeWidth * 0.5);
+   443→        votes.push({ key: "asian_breakout", dir: -1, sl: c.c + slDist });
+   444→      }
+   445→    }
+   446→  }
+   447→
+   448→  return votes;
+   449→}
+   450→
+   451→// ---------- التعلّم ----------
+   452→function learnWeights(
+   453→  stratTrades: Map<string, RawTrade[]>,
+   454→  base: Record<string, number>
+   455→): Record<string, number> {
+   456→  const mult: Record<string, number> = {};
+   457→  for (const meta of STRATEGY_META) {
+   458→    const trades = stratTrades.get(meta.key) ?? [];
+   459→    const n = trades.length;
+   460→    if (n >= 12) {
+   461→      const wins = trades.filter((t) => t.result === "win").length;
+   462→      const wl = wilsonLower(wins, n);
+   463→      mult[meta.key] = clamp(wl / 0.5, 0.55, 1.45);
+   464→    } else {
+   465→      mult[meta.key] = 1; // عينة صغيرة — لا تعلّم
+   466→    }
+   467→  }
+   468→
+   469→  // مضاعف العمود = متوسط مرجّح بعدد صفقات استراتيجياته
+   470→  const pillarMult: Record<string, number> = {};
+   471→  for (const pKey of PILLAR_KEYS) {
+   472→    let num = 0;
+   473→    let den = 0;
+   474→    for (const meta of STRATEGY_META) {
+   475→      if (meta.pillar !== pKey) continue;
+   476→      const n = (stratTrades.get(meta.key) ?? []).length;
+   477→      num += mult[meta.key] * n;
+   478→      den += n;
+   479→    }
+   480→    pillarMult[pKey] = den > 0 ? num / den : 1;
+   481→  }
+   482→
+   483→  const learned: Record<string, number> = {};
+   484→  for (const pKey of PILLAR_KEYS) {
+   485→    learned[pKey] = base[pKey] * pillarMult[pKey];
+   486→  }
+   487→  // إعادة التطبيع إلى 100 مع حد أدنى 6
+   488→  let sum = PILLAR_KEYS.reduce((a, k) => a + learned[k], 0);
+   489→  for (const k of PILLAR_KEYS) learned[k] = Math.max(6, learned[k]);
+   490→  sum = PILLAR_KEYS.reduce((a, k) => a + learned[k], 0);
+   491→  for (const k of PILLAR_KEYS) learned[k] = Math.round((learned[k] / sum) * 1000) / 10;
+   492→  return learned;
+   493→}
+   494→
+   495→// ---------- التنفيذ الرئيسي ----------
+   496→export async function runBacktest(tf: "15m" | "1h"): Promise<BacktestResult> {
+   497→  const interval = tf === "1h" ? "60m" : "15m";
+   498→  const range = tf === "1h" ? "3mo" : "60d";
+   499→  const hold = tf === "1h" ? 24 : 48; // يوم تداول / 12 ساعة
+   500→
+   501→  const candles = await fetchCandles("GC=F", interval, range);
+   502→  if (candles.length < WARMUP + 400) {
+   503→    throw new Error(`بيانات غير كافية للتدريب (${candles.length} شمعة) — جرّب الإطار الآخر`);
+   504→  }
+   505→
+   506→  const closes = candles.map((c) => c.c);
+   507→  const emaSet = computeEMASet(closes);
+   508→  const rsiArr = rsi(closes, 14);
+   509→  const macdData = macd(closes);
+   510→  const bbData = bollinger(closes);
+   511→  const atrData = atr(candles, 14);
+   512→
+   513→  // سلسلة ADX سببية (Wilder) — نفس رياضيات indicators.ts لكن لكل شمعة
+   514→  const adxArr = adxSeries(candles, 14);
+   515→
+   516→  // عرض بولينجر + متوسطه المتحرك السببي
+   517→  const bw: number[] = new Array(candles.length).fill(NaN);
+   518→  for (let i = 0; i < candles.length; i++) {
+   519→    const u = bbData.upper[i];
+   520→    const m = bbData.mid[i];
+   521→    if (!isNaN(u) && !isNaN(m) && m > 0) bw[i] = ((bbData.upper[i] - bbData.lower[i]) / m) * 100;
+   522→  }
+   523→  const bwAvg = rollingAvg(bw, 50);
+   524→
+   525→  const { days, dayOf } = buildDays(candles);
+   526→
+   527→  const ctx: Ctx = {
+   528→    candles,
+   529→    closes,
+   530→    ema9: emaSet.ema9,
+   531→    ema21: emaSet.ema21,
+   532→    ema50: emaSet.ema50,
+   533→    ema200: emaSet.ema200,
+   534→    rsiArr,
+   535→    macdLine: macdData.line,
+   536→    macdSignal: macdData.signal,
+   537→    macdHist: macdData.histogram,
+   538→    bbUpper: bbData.upper,
+   539→    bbLower: bbData.lower,
+   540→    bw,
+   541→    bwAvg,
+   542→    atrArr: atrData.values,
+   543→    adxArr,
+   544→    days,
+   545→    dayOf,
+   546→  };
+   547→
+   548→  const len = candles.length;
+   549→  const split = WARMUP + Math.floor((len - WARMUP - hold) * 0.7); // 70% تدريب / 30% اختبار
+   550→
+   551→  // ===== 1) تقييم كل الشموع (التصويت) — مرة واحدة =====
+   552→  const votesAll: Vote[][] = new Array(len);
+   553→  for (let i = WARMUP; i < len - 1; i++) {
+   554→    votesAll[i] = evaluateAt(ctx, i);
+   555→  }
+   556→
+   557→  // ===== 2) صفقات كل استراتيجية (مع تهدئة — صفقة واحدة نشطة) =====
+   558→  const stratTrades = new Map<string, RawTrade[]>();
+   559→  const takenPerStrategy = new Map<string, number[]>(); // فهرس الشموع المأخوذة
+   560→  for (const meta of STRATEGY_META) {
+   561→    const trades: RawTrade[] = [];
+   562→    const taken: number[] = [];
+   563→    let busyUntil = -1;
+   564→    let lastAsianDay = -1; // كسر آسيوي واحد لكل يوم
+   565→    for (let i = WARMUP; i < len - 1; i++) {
+   566→      const votes = votesAll[i] ?? [];
+   567→      const vote = votes.find((v) => v.key === meta.key);
+   568→      if (!vote) continue;
+   569→      if (i <= busyUntil) continue;
+   570→      if (meta.key === "asian_breakout") {
+   571→        const d = dayOf[i];
+   572→        if (d === lastAsianDay) continue;
+   573→        lastAsianDay = d;
+   574→      }
+   575→      const sim = simulate(candles, i, vote.dir, vote.sl, hold);
+   576→      if (!sim) continue;
+   577→      trades.push({
+   578→        key: meta.key,
+   579→        i,
+   580→        t: candles[i].t,
+   581→        entryT: candles[i + 1].t,
+   582→        dir: vote.dir,
+   583→        entry: candles[i + 1].o,
+   584→        sl: vote.sl,
+   585→        tp1: candles[i + 1].o + vote.dir * Math.abs(candles[i + 1].o - vote.sl),
+   586→        result: sim.result,
+   587→        r: sim.r,
+   588→        bars: sim.bars,
+   589→        endIdx: sim.endIdx,
+   590→      });
+   591→      taken.push(i);
+   592→      busyUntil = sim.endIdx;
+   593→    }
+   594→    stratTrades.set(meta.key, trades);
+   595→    takenPerStrategy.set(meta.key, taken);
+   596→  }
+   597→
+   598→  // ===== 3) التوليفة المركّبة (إشارة البوت الكلية) =====
+   599→  function runComposite(
+   600→    from: number,
+   601→    to: number,
+   602→    weights: Record<string, number> | null // null = أوزان متساوية
+   603→  ): RawTrade[] {
+   604→    const trades: RawTrade[] = [];
+   605→    let busyUntil = -1;
+   606→    let lastAsianDay = -1;
+   607→    for (let i = from; i < to; i++) {
+   608→      const votes = votesAll[i] ?? [];
+   609→      if (!votes.length) continue;
+   610→      if (i <= busyUntil) continue;
+   611→      let num = 0;
+   612→      let den = 0;
+   613→      for (const v of votes) {
+   614→        const meta = STRATEGY_META.find((m) => m.key === v.key)!;
+   615→        const w = weights ? weights[meta.pillar] : 1;
+   616→        num += v.dir * w;
+   617→        den += w;
+   618→      }
+   619→      if (den === 0) continue;
+   620→      const net = num / den;
+   621→      if (net < 0.15 && net > -0.15) continue;
+   622→      const dir: 1 | -1 = net >= 0.15 ? 1 : -1;
+   623→
+   624→      const agreeing = votes.filter((v) => v.dir === dir);
+   625→      if (agreeing.length < 2) continue; // توافق صورتين على الأقل
+   626→
+   627→      // كسر آسيوي واحد لكل يوم (لتناسق الاستراتيجيات)
+   628→      const hasAsian = agreeing.some((v) => v.key === "asian_breakout");
+   629→      if (hasAsian) {
+   630→        const d = dayOf[i];
+   631→        if (d === lastAsianDay) continue;
+   632→        lastAsianDay = d;
+   633→      }
+   634→
+   635→      const c = candles[i];
+   636→      const a = ctx.atrArr[i];
+   637→      const sl = dir === 1 ? c.c - 1.5 * a : c.c + 1.5 * a;
+   638→      const sim = simulate(candles, i, dir, sl, hold);
+   639→      if (!sim) continue;
+   640→      trades.push({
+   641→        key: "composite",
+   642→        i,
+   643→        t: candles[i].t,
+   644→        entryT: candles[i + 1].t,
+   645→        dir,
+   646→        entry: candles[i + 1].o,
+   647→        sl,
+   648→        tp1: candles[i + 1].o + dir * Math.abs(candles[i + 1].o - sl),
+   649→        result: sim.result,
+   650→        r: sim.r,
+   651→        bars: sim.bars,
+   652→        endIdx: sim.endIdx,
+   653→      });
+   654→      busyUntil = sim.endIdx;
+   655→    }
+   656→    return trades;
+   657→  }
+   658→
+   659→  // ===== 4) التعلم على فترة التدريب ثم الاختبار الإسقاطي =====
+   660→  const trainStratTrades = new Map<string, RawTrade[]>();
+   661→  for (const [k, ts] of stratTrades) trainStratTrades.set(k, ts.filter((t) => t.i < split));
+   662→
+   663→  const base = { ...BASE_PILLAR_WEIGHTS } as Record<string, number>;
+   664→  const learnedTestW = learnWeights(trainStratTrades, base);
+   665→
+   666→  const tradesBeforeTest = runComposite(split, len - 1, null); // أوزان متساوية
+   667→  const tradesAfterTest = runComposite(split, len - 1, learnedTestW); // أوزان متعلمة
+   668→  const tradesTrainSeg = runComposite(WARMUP, split, null); // داخل عينة التدريب
+   669→
+   670→  // أوزان التطبيق المباشر — تعلم من كامل التاريخ
+   671→  const fullStratTrades = stratTrades;
+   672→  const learnedLiveW = learnWeights(fullStratTrades, base);
+   673→  const tradesLive = runComposite(WARMUP, len - 1, learnedLiveW);
+   674→
+   675→  // حفظ حالة التعلّم ليمتد إليها محرك الإشارة المباشر
+   676→  setLearnedState({
+   677→    weights: learnedLiveW,
+   678→    stats: {
+   679→      winRate: tradesLive.length ? tradesLive.filter((t) => t.result === "win").length / tradesLive.length : 0,
+   680→      trades: tradesLive.length,
+   681→      profitFactor: statsOf(tradesLive).profitFactor,
+   682→      expectancyR: statsOf(tradesLive).expectancyR,
+   683→      maxDrawdownR: statsOf(tradesLive).maxDrawdownR,
+   684→      tf,
+   685→      from: new Date(candles[WARMUP].t).toISOString(),
+   686→      to: new Date(candles[len - 1].t).toISOString(),
+   687→      updatedAt: new Date().toISOString(),
+   688→    },
+   689→    tf,
+   690→    ts: Date.now(),
+   691→  });
+   692→
+   693→  // ===== 5) نتائج الاستراتيجيات (كامل الفترة) =====
+   694→  const strategies: BtStrategy[] = STRATEGY_META.map((meta) => {
+   695→    const ts = stratTrades.get(meta.key) ?? [];
+   696→    const st = statsOf(ts);
+   697→    const wins = st.wins;
+   698→    const n = st.trades;
+   699→    const wl = wilsonLower(wins, n);
+   700→    return {
+   701→      key: meta.key,
+   702→      nameAr: meta.nameAr,
+   703→      pillar: meta.pillar,
+   704→      pillarAr: meta.pillarAr,
+   705→      trades: n,
+   706→      wins,
+   707→      losses: st.losses,
+   708→      timeouts: st.timeouts,
+   709→      winRate: Math.round(st.winRate * 1000) / 10,
+   710→      wilson: Math.round(wl * 1000) / 10,
+   711→      avgR: Math.round(st.avgR * 100) / 100,
+   712→      profitFactor: st.profitFactor,
+   713→      multiplier: n >= 12 ? Math.round(clamp(wl / 0.5, 0.55, 1.45) * 100) / 100 : 1,
+   714→      grossR: st.grossR,
+   715→    };
+   716→  });
+   717→
+   718→  // ===== 6) منحنى R التراكمي =====
+   719→  const equity: number[] = [0];
+   720→  for (const t of tradesAfterTest) equity.push(Math.round((equity[equity.length - 1] + t.r) * 100) / 100);
+   721→  const equityBefore: number[] = [0];
+   722→  for (const t of tradesBeforeTest) equityBefore.push(Math.round((equityBefore[equityBefore.length - 1] + t.r) * 100) / 100);
+   723→
+   724→  // ===== 7) تحليل الشهور (الشهر الحالي + السابق) =====
+   725→  const months: BtMonth[] = [];
+   726→  {
+   727→    interface MonthAgg {
+   728→      ym: string;
+   729→      open: number;
+   730→      close: number;
+   731→      high: number;
+   732→      low: number;
+   733→      atrSum: number;
+   734→      atrN: number;
+   735→    }
+   736→    const byMonth = new Map<string, MonthAgg>();
+   737→    const order: string[] = [];
+   738→    for (let i = WARMUP; i < len; i++) {
+   739→      const d = new Date(candles[i].t);
+   740→      const ym = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+   741→      let agg = byMonth.get(ym);
+   742→      if (!agg) {
+   743→        agg = { ym, open: candles[i].o, close: candles[i].c, high: -Infinity, low: Infinity, atrSum: 0, atrN: 0 };
+   744→        byMonth.set(ym, agg);
+   745→        order.push(ym);
+   746→      }
+   747→      agg.close = candles[i].c;
+   748→      agg.high = Math.max(agg.high, candles[i].h);
+   749→      agg.low = Math.min(agg.low, candles[i].l);
+   750→      const a = ctx.atrArr[i];
+   751→      if (!isNaN(a) && a > 0) {
+   752→        agg.atrSum += a;
+   753→        agg.atrN++;
+   754→      }
+   755→    }
+   756→    for (const ym of order.slice(-3)) {
+   757→      const agg = byMonth.get(ym)!;
+   758→      const mt = tradesLive.filter((t) => {
+   759→        const d = new Date(t.t);
+   760→        return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}` === ym;
+   761→      });
+   762→      const mWins = mt.filter((t) => t.result === "win").length;
+   763→      const buys = mt.filter((t) => t.dir === 1).length;
+   764→      const sells = mt.length - buys;
+   765→      const [y, m] = ym.split("-");
+   766→      months.push({
+   767→        ym,
+   768→        label: `${AR_MONTHS[parseInt(m, 10) - 1]} ${y}`,
+   769→        open: Math.round(agg.open * 10) / 10,
+   770→        high: Math.round(agg.high * 10) / 10,
+   771→        low: Math.round(agg.low * 10) / 10,
+   772→        close: Math.round(agg.close * 10) / 10,
+   773→        changePct: Math.round(((agg.close - agg.open) / agg.open) * 1000) / 10,
+   774→        atrAvg: agg.atrN ? Math.round((agg.atrSum / agg.atrN) * 10) / 10 : 0,
+   775→        trades: mt.length,
+   776→        wins: mWins,
+   777→        wr: mt.length ? Math.round((mWins / mt.length) * 1000) / 10 : 0,
+   778→        dominant: buys > sells * 1.3 ? "BUY" : sells > buys * 1.3 ? "SELL" : "متوازن",
+   779→      });
+   780→    }
+   781→  }
+   782→
+   783→  // ===== 8) آخر الصفقات للعرض =====
+   784→  const trades: BtTrade[] = tradesLive
+   785→    .slice(-40)
+   786→    .reverse()
+   787→    .map((t) => {
+   788→      const votes = votesAll[t.i] ?? [];
+   789→      const agreeing = votes
+   790→        .filter((v) => v.dir === t.dir)
+   791→        .map((v) => STRATEGY_META.find((m) => m.key === v.key)?.nameAr ?? v.key)
+   792→        .slice(0, 3);
+   793→      return {
+   794→        t: t.t,
+   795→        entryT: t.entryT,
+   796→        dir: t.dir === 1 ? "BUY" : "SELL",
+   797→        strategies: agreeing,
+   798→        entry: Math.round(t.entry * 10) / 10,
+   799→        sl: Math.round(t.sl * 10) / 10,
+   800→        tp1: Math.round(t.tp1 * 10) / 10,
+   801→        result: t.result,
+   802→        r: t.r,
+   803→        bars: t.bars,
+   804→      };
+   805→    });
+   806→
+   807→  return {
+   808→    tf,
+   809→    generatedAt: new Date().toISOString(),
+   810→    dataSource: `Yahoo Finance GC=F — ${range} @ ${tf}`,
+   811→    candlesTested: len - WARMUP,
+   812→    from: new Date(candles[WARMUP].t).toISOString(),
+   813→    to: new Date(candles[len - 1].t).toISOString(),
+   814→    holdBars: hold,
+   815→    warmup: WARMUP,
+   816→    splitIdx: split,
+   817→    trainFrom: new Date(candles[WARMUP].t).toISOString(),
+   818→    testFrom: new Date(candles[Math.min(split, len - 1)].t).toISOString(),
+   819→    statsBefore: statsOf(tradesBeforeTest),
+   820→    statsAfter: statsOf(tradesAfterTest),
+   821→    statsTrain: statsOf(tradesTrainSeg),
+   822→    equity,
+   823→    equityBefore,
+   824→    strategies,
+   825→    trades,
+   826→    months,
+   827→    weights: {
+   828→      base,
+   829→      learnedLive: learnedLiveW,
+   830→      learnedTest: learnedTestW,
+   831→    },
+   832→    notes: [
+   833→      "البروتوكول: عند كل شمعة تاريخية يستخدم البوت بيانات الشموع السابقة فقط (لا نظرة مستقبلية)، ثم يدخل على افتتاح الشمعة التالية ويتحقق من النتيجة لاحقاً.",
+   834→      "أولوية الوقف داخل الشمعة الواحدة (افتراض متحفظ) — إذا لامست الشمعة الوقف والهدف معاً تُحتسب خسارة.",
+   835→      "التعلم على أول 70% من الفترة، ثم اختبار إسقاطي على آخر 30% لم يرها البوت أثناء التعلم — مقارنة عادلة قبل/بعد.",
+   836→      "أوزان الأعمدة تعدّل بمضاعف Wilson السفلي (حد ثقة 95%) — الاستراتيجيات ذات العينات الصغيرة لا تغيّر وزنها.",
+   837→      `الأوزان المعروضة للتطبيق المباشر مشتقة من كامل الفترة (${candlesTestedStr(len - WARMUP)} شمعة).`,
+   838→    ],
+   839→  };
+   840→}
+   841→
+   842→function candlesTestedStr(n: number): string {
+   843→  return n.toLocaleString("en-US");
+   844→}
+   845→
+   846→// ---------- متوسط متحرك سببي ----------
+   847→function rollingAvg(values: number[], win: number): number[] {
+   848→  const out: number[] = new Array(values.length).fill(NaN);
+   849→  let sum = 0;
+   850→  let count = 0;
+   851→  const queue: number[] = [];
+   852→  for (let i = 0; i < values.length; i++) {
+   853→    const v = values[i];
+   854→    if (!isNaN(v)) {
+   855→      queue.push(v);
+   856→      sum += v;
+   857→      count++;
+   858→      if (queue.length > win) {
+   859→        sum -= queue.shift()!;
+   860→        count--;
+   861→      }
+   862→    }
+   863→    out[i] = count >= Math.min(win, 20) ? sum / count : NaN;
+   864→  }
+   865→  return out;
+   866→}
+   867→
+   868→// ---------- سلسلة ADX سببية (Wilder) ----------
+   869→function adxSeries(candles: Candle[], period: number): number[] {
+   870→  const n = candles.length;
+   871→  const out: number[] = new Array(n).fill(NaN);
+   872→  if (n < period * 2 + 1) return out;
+   873→
+   874→  const plusDM: number[] = [0];
+   875→  const minusDM: number[] = [0];
+   876→  const trs: number[] = [candles[0].h - candles[0].l];
+   877→  for (let i = 1; i < n; i++) {
+   878→    const upMove = candles[i].h - candles[i - 1].h;
+   879→    const downMove = candles[i - 1].l - candles[i].l;
+   880→    plusDM.push(upMove > downMove && upMove > 0 ? upMove : 0);
+   881→    minusDM.push(downMove > upMove && downMove > 0 ? downMove : 0);
+   882→    const prevClose = candles[i - 1].c;
+   883→    trs.push(Math.max(candles[i].h - candles[i].l, Math.abs(candles[i].h - prevClose), Math.abs(candles[i].l - prevClose)));
+   884→  }
+   885→
+   886→  const smooth = (arr: number[]): number[] => {
+   887→    const s: number[] = new Array(arr.length).fill(NaN);
+   888→    let sum = 0;
+   889→    for (let i = 0; i < period; i++) sum += arr[i];
+   890→    s[period - 1] = sum;
+   891→    for (let i = period; i < arr.length; i++) s[i] = s[i - 1] - s[i - 1] / period + arr[i];
+   892→    return s;
+   893→  };
+   894→
+   895→  const smTR = smooth(trs);
+   896→  const smPDM = smooth(plusDM);
+   897→  const smMDM = smooth(minusDM);
+   898→
+   899→  const dxs: number[] = [];
+   900→  const dxIdx: number[] = []; // فهرس الشمعة المقابل
+   901→  for (let i = period - 1; i < n; i++) {
+   902→    const tr = smTR[i];
+   903→    if (tr > 0 && !isNaN(tr)) {
+   904→      const pdi = (smPDM[i] / tr) * 100;
+   905→      const mdi = (smMDM[i] / tr) * 100;
+   906→      const sum = pdi + mdi;
+   907→      dxs.push(sum > 0 ? (Math.abs(pdi - mdi) / sum) * 100 : 0);
+   908→      dxIdx.push(i);
+   909→    }
+   910→  }
+   911→
+   912→  if (dxs.length >= period) {
+   913→    let a = 0;
+   914→    for (let i = 0; i < period; i++) a += dxs[i];
+   915→    a /= period;
+   916→    out[dxIdx[period - 1]] = a;
+   917→    for (let i = period; i < dxs.length; i++) {
+   918→      a = (a * (period - 1) + dxs[i]) / period;
+   919→      out[dxIdx[i]] = a;
+   920→    }
+   921→  }
+   922→  return out;
+   923→}
+   924→

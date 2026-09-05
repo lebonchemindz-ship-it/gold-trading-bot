@@ -114,7 +114,7 @@ const AR_MONTHS = [
   "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر",
 ];
 
-const STRATEGY_META: { key: string; nameAr: string; pillar: string; pillarAr: string }[] = [
+export const STRATEGY_META: { key: string; nameAr: string; pillar: string; pillarAr: string }[] = [
   { key: "ema_trend", nameAr: "اتجاه EMA المتعدد (9>21>50)", pillar: "trend", pillarAr: "الاتجاه" },
   { key: "bb_break", nameAr: "كسر انضغاط بولينجر", pillar: "trend", pillarAr: "الاتجاه" },
   { key: "macd_cross", nameAr: "تقاطع MACD مع الفلتر", pillar: "momentum", pillarAr: "الزخم" },
@@ -129,7 +129,7 @@ const STRATEGY_META: { key: string; nameAr: string; pillar: string; pillarAr: st
 // ---------- أدوات ----------
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
-function wilsonLower(wins: number, n: number, z = 1.96): number {
+export function wilsonLower(wins: number, n: number, z = 1.96): number {
   if (n <= 0) return 0;
   const p = wins / n;
   const denom = 1 + (z * z) / n;
@@ -206,7 +206,7 @@ function statsOf(trades: RawTrade[]): BtStats {
 }
 
 /** محاكاة النتيجة — الوقف له الأولوية داخل الشمعة (متحفظ) */
-function simulate(
+export function simulate(
   candles: Candle[],
   i: number,
   dir: 1 | -1,
@@ -237,7 +237,7 @@ function simulate(
 }
 
 // ---------- بنية اليوم UTC ----------
-interface DayInfo {
+export interface DayInfo {
   idx: number; // تسلسل
   key: string;
   high: number;
@@ -249,7 +249,7 @@ interface DayInfo {
   lastIdx: number;
 }
 
-function buildDays(candles: Candle[]): { days: DayInfo[]; dayOf: number[] } {
+export function buildDays(candles: Candle[]): { days: DayInfo[]; dayOf: number[] } {
   const days: DayInfo[] = [];
   const dayOf: number[] = new Array(candles.length).fill(-1);
   const map = new Map<string, DayInfo>();
@@ -288,13 +288,13 @@ function buildDays(candles: Candle[]): { days: DayInfo[]; dayOf: number[] } {
 }
 
 // ---------- التقييم عند كل شمعة (كل الاستراتيجيات) ----------
-interface Vote {
+export interface Vote {
   key: string;
   dir: 1 | -1;
   sl: number; // قيمة الوقف المطلقة
 }
 
-interface Ctx {
+export interface Ctx {
   candles: Candle[];
   closes: number[];
   ema9: number[];
@@ -315,7 +315,7 @@ interface Ctx {
   dayOf: number[];
 }
 
-function evaluateAt(ctx: Ctx, i: number): Vote[] {
+export function evaluateAt(ctx: Ctx, i: number): Vote[] {
   const votes: Vote[] = [];
   const { candles, closes } = ctx;
   const c = candles[i];
@@ -844,7 +844,7 @@ function candlesTestedStr(n: number): string {
 }
 
 // ---------- متوسط متحرك سببي ----------
-function rollingAvg(values: number[], win: number): number[] {
+export function rollingAvg(values: number[], win: number): number[] {
   const out: number[] = new Array(values.length).fill(NaN);
   let sum = 0;
   let count = 0;
@@ -866,7 +866,7 @@ function rollingAvg(values: number[], win: number): number[] {
 }
 
 // ---------- سلسلة ADX سببية (Wilder) ----------
-function adxSeries(candles: Candle[], period: number): number[] {
+export function adxSeries(candles: Candle[], period: number): number[] {
   const n = candles.length;
   const out: number[] = new Array(n).fill(NaN);
   if (n < period * 2 + 1) return out;
