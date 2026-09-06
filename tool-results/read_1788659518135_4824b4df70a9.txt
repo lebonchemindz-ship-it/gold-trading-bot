@@ -1,0 +1,989 @@
+     1→// ============================================================
+     2→// محرك التدريب الذاتي العميق — 6 أشهر (Walk-Forward متعدد الحلقات)
+     3→// البروتوكول (كما طلبه المستخدم حرفياً):
+     4→//   1) يتنبأ عند كل نقطة تاريخية دون رؤية النتيجة (بيانات سابقة فقط)
+     5→//   2) يكشف النتيجة لاحقاً ويتحقق: صحيحة أم خاطئة؟
+     6→//   3) يعطي تفسيراً لنفسه: لماذا نجح/فشل + الدرس المستفاد
+     7→//   4) يقوّي استراتيجياته: تعديل المضاعفات لكل استراتيجية × نظام سوق
+     8→//   5) يعيد الحلقة مرات متعددة (Epochs) حتى يستقر التعلم
+     9→//   6) اختبار أعمى نهائي: آخر 25% لم يرها إطلاقاً أثناء التعلم
+    10→// كل المؤشرات سببية (causal) — لا نظرة مستقبلية في أي مكان
+    11→// ============================================================
+    12→
+    13→import { fetchCandles } from "./market";
+    14→import { computeEMASet, rsi, macd, bollinger, atr } from "./indicators";
+    15→import { BASE_PILLAR_WEIGHTS, PILLAR_KEYS, setLearnedState, weightsToParam } from "./learning";
+    16→import {
+    17→  evaluateAt,
+    18→  simulate,
+    19→  buildDays,
+    20→  adxSeries,
+    21→  rollingAvg,
+    22→  wilsonLower,
+    23→  STRATEGY_META,
+    24→  type Ctx,
+    25→  type Vote,
+    26→  type BtMonth,
+    27→  type BtStats,
+    28→} from "./backtest";
+    29→import type { Candle } from "./types";
+    30→
+    31→// ---------- الأنواع العامة ----------
+    32→export type Regime = "trend_up" | "trend_down" | "range";
+    33→
+    34→export interface TrainEpoch {
+    35→  epoch: number;
+    36→  trades: number;
+    37→  winRate: number; // %
+    38→  profitFactor: number;
+    39→  expectancyR: number;
+    40→  grossR: number;
+    41→  weightsSnapshot: Record<string, number>;
+    42→  multSnapshot: Record<string, number>; // متوسط المضاعف لكل استراتيجية
+    43→  note: string; // ماذا تعلم في هذه الحلقة (عربي)
+    44→}
+    45→
+    46→export interface TrainTimelineEntry {
+    47→  i: number;
+    48→  t: number;
+    49→  dateLabel: string;
+    50→  phase: "train" | "holdout"; // مرحلة التعلم أم الاختبار الأعمى
+    51→  dir: "BUY" | "SELL";
+    52→  entry: number;
+    53→  sl: number;
+    54→  tp1: number;
+    55→  confidence: number; // 0..100
+    56→  agreeing: string[];
+    57→  disagreeing: string[];
+    58→  regime: Regime;
+    59→  regimeAr: string;
+    60→  eventDay: string | null;
+    61→  result: "win" | "loss" | "timeout";
+    62→  r: number;
+    63→  bars: number;
+    64→  exitPrice: number;
+    65→  explanation: string; // تفسير البوت لنفسه (عربي)
+    66→  lossTags: string[];
+    67→}
+    68→
+    69→export interface TrainLesson {
+    70→  key: string;
+    71→  text: string;
+    72→  count: number;
+    73→  severity: "good" | "warn" | "info";
+    74→}
+    75→
+    76→export interface StrategyMult {
+    77→  key: string;
+    78→  nameAr: string;
+    79→  pillarAr: string;
+    80→  global: number;
+    81→  trendUp: number;
+    82→  trendDown: number;
+    83→  range: number;
+    84→  samples: number;
+    85→  winRate: number;
+    86→}
+    87→
+    88→export interface HoldoutStats {
+    89→  tradesBefore: number;
+    90→  winRateBefore: number;
+    91→  pfBefore: number;
+    92→  expBefore: number;
+    93→  tradesAfter: number;
+    94→  winRateAfter: number;
+    95→  pfAfter: number;
+    96→  expAfter: number;
+    97→  equityBefore: number[];
+    98→  equityAfter: number[];
+    99→  improvementPct: number;
+   100→  verdict: string;
+   101→}
+   102→
+   103→export interface SelfTrainingResult {
+   104→  tf: "1h" | "1d";
+   105→  epochsRun: number;
+   106→  requestedEpochs: number;
+   107→  converged: boolean;
+   108→  generatedAt: string;
+   109→  dataSource: string;
+   110→  window: { from: string; to: string; candles: number; months: number };
+   111→  blindStats: BtStats; // أداء التنبؤ الأعمى على كامل 6 أشهر بالأوزان النهائية
+   112→  holdout: HoldoutStats; // الاختبار الأعمى الصارم (آخر 25%)
+   113→  epochLog: TrainEpoch[];
+   114→  equity: number[]; // منحنى R التراكمي (كامل الفترة)
+   115→  timeline: TrainTimelineEntry[]; // خط زمني للتنبؤات (لإعادة التشغيل التفاعلي)
+   116→  strategies: StrategyMult[];
+   117→  lessons: TrainLesson[];
+   118→  months: BtMonth[];
+   119→  selfKnowledge: {
+   120→    blindAccuracy: number;
+   121→    totalPredictions: number;
+   122→    bestStrategy: string | null;
+   123→    bestStrategyWr: number;
+   124→    worstStrategy: string | null;
+   125→    worstStrategyWr: number;
+   126→    calibration: { lowWr: number; midWr: number; highWr: number; lowN: number; midN: number; highN: number; verdict: string };
+   127→    regimeNotes: string[];
+   128→    summary: string;
+   129→  };
+   130→  trainingLevel: { score: number; label: string; epochsDone: number };
+   131→  weights: Record<string, number>; // أوزان الأعمدة النهائية (تُطبق مباشرة)
+   132→  weightsParam: string;
+   133→}
+   134→
+   135→// ---------- ثوابت ----------
+   136→const MAX_EPOCHS = 8;
+   137→const WARMUP_1H = 210; // EMA200 + متوسطات
+   138→const MIN_CONVERGENCE = 0.4; // نقطة مئوية
+   139→const AR_MONTHS = [
+   140→  "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+   141→  "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر",
+   142→];
+   143→const REGIME_AR: Record<Regime, string> = {
+   144→  trend_up: "سوق اتجاهي صاعد",
+   145→  trend_down: "سوق اتجاهي هابط",
+   146→  range: "سوق عرضي (تذبذب)",
+   147→};
+   148→
+   149→const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+   150→const r1 = (v: number) => Math.round(v * 10) / 10;
+   151→const r2 = (v: number) => Math.round(v * 100) / 100;
+   152→const r3 = (v: number) => Math.round(v * 1000) / 1000;
+   153→
+   154→const META_BY_KEY: Map<string, (typeof STRATEGY_META)[number]> = new Map(
+   155→  STRATEGY_META.map((m) => [m.key, m])
+   156→);
+   157→
+   158→// ---------- أيام البيانات عالية التأثير (كشف حتمي) ----------
+   159→// FOMC: تواريخ الاجتماعات المعلنة 2025-2026 (يوم القرار + اليوم السابق)
+   160→const FOMC_DAYS = new Set([
+   161→  "2025-01-28", "2025-01-29", "2025-03-18", "2025-03-19", "2025-05-06", "2025-05-07",
+   162→  "2025-06-17", "2025-06-18", "2025-07-29", "2025-07-30", "2025-09-16", "2025-09-17",
+   163→  "2025-10-28", "2025-10-29", "2025-12-09", "2025-12-10",
+   164→  "2026-01-27", "2026-01-28", "2026-03-17", "2026-03-18", "2026-04-28", "2026-04-29",
+   165→  "2026-06-16", "2026-06-17", "2026-07-28", "2026-07-29", "2026-09-15", "2026-09-16",
+   166→  "2026-10-27", "2026-10-28", "2026-12-08", "2026-12-09",
+   167→]);
+   168→
+   169→const pad2 = (n: number) => String(n).padStart(2, "0");
+   170→
+   171→/** يوم بيانات عالي التأثير؟ (NFP أول جمعة + FOMC + CPI تقديري) */
+   172→function highImpactDay(t: number): string | null {
+   173→  const d = new Date(t);
+   174→  const y = d.getUTCFullYear();
+   175→  const m = d.getUTCMonth();
+   176→  const day = d.getUTCDate();
+   177→  const key = `${y}-${pad2(m + 1)}-${pad2(day)}`;
+   178→  if (FOMC_DAYS.has(key)) return "اجتماع الفيدرالي FOMC (قرار الفائدة)";
+   179→  // أول جمعة من الشهر = NFP (يوم الإصدار أو اليوم السابق)
+   180→  const firstDow = new Date(Date.UTC(y, m, 1)).getUTCDay();
+   181→  const firstFriday = ((5 - firstDow + 7) % 7) + 1;
+   182→  if (day === firstFriday || day === firstFriday - 1) return "بيانات الوظائف الأمريكية NFP (تقديري)";
+   183→  if (day >= 11 && day <= 13) return "بيانات التضخم CPI (تقديري)";
+   184→  return null;
+   185→}
+   186→
+   187→/** تصنيف نظام السوق عند الشمعة i (سببي — لا مستقبل) */
+   188→function regimeAt(ctx: Ctx, i: number): Regime {
+   189→  const adx = ctx.adxArr[i];
+   190→  const e50 = ctx.ema50[i];
+   191→  const e200 = ctx.ema200[i];
+   192→  if (isNaN(adx) || isNaN(e50) || isNaN(e200)) return "range";
+   193→  if (adx >= 20) return e50 >= e200 ? "trend_up" : "trend_down";
+   194→  return "range";
+   195→}
+   196→
+   197→// ---------- صفقة التدريب ----------
+   198→interface TrainerTrade {
+   199→  i: number;
+   200→  t: number;
+   201→  entryT: number;
+   202→  dir: 1 | -1;
+   203→  entry: number;
+   204→  sl: number;
+   205→  tp1: number;
+   206→  result: "win" | "loss" | "timeout";
+   207→  r: number;
+   208→  bars: number;
+   209→  endIdx: number;
+   210→  confidence: number;
+   211→  votes: Vote[];
+   212→  regime: Regime;
+   213→}
+   214→
+   215→function statsOfTrades(trades: TrainerTrade[]): BtStats {
+   216→  const wins = trades.filter((t) => t.result === "win").length;
+   217→  const losses = trades.filter((t) => t.result === "loss").length;
+   218→  const timeouts = trades.length - wins - losses;
+   219→  const grossR = trades.reduce((a, t) => a + t.r, 0);
+   220→  const posR = trades.filter((t) => t.r > 0).reduce((a, t) => a + t.r, 0);
+   221→  const negR = Math.abs(trades.filter((t) => t.r < 0).reduce((a, t) => a + t.r, 0));
+   222→
+   223→  let cum = 0;
+   224→  let peak = 0;
+   225→  let maxDd = 0;
+   226→  for (const t of trades) {
+   227→    cum += t.r;
+   228→    peak = Math.max(peak, cum);
+   229→    maxDd = Math.max(maxDd, peak - cum);
+   230→  }
+   231→  let best = 0;
+   232→  let worst = 0;
+   233→  let curW = 0;
+   234→  let curL = 0;
+   235→  for (const t of trades) {
+   236→    if (t.result === "win") {
+   237→      curW++;
+   238→      curL = 0;
+   239→    } else {
+   240→      curL++;
+   241→      curW = 0;
+   242→    }
+   243→    best = Math.max(best, curW);
+   244→    worst = Math.max(worst, curL);
+   245→  }
+   246→  const n = trades.length;
+   247→  return {
+   248→    trades: n,
+   249→    wins,
+   250→    losses,
+   251→    timeouts,
+   252→    winRate: n ? wins / n : 0,
+   253→    avgR: n ? grossR / n : 0,
+   254→    grossR: r2(grossR),
+   255→    profitFactor: negR > 0 ? r2(posR / negR) : posR > 0 ? 99 : 0,
+   256→    expectancyR: n ? r3(grossR / n) : 0,
+   257→    maxDrawdownR: r2(maxDd),
+   258→    bestStreak: best,
+   259→    worstStreak: worst,
+   260→  };
+   261→}
+   262→
+   263→function equityOf(trades: TrainerTrade[]): number[] {
+   264→  const eq: number[] = [0];
+   265→  for (const t of trades) eq.push(r2(eq[eq.length - 1] + t.r));
+   266→  return eq;
+   267→}
+   268→
+   269→// ============================================================
+   270→// التنفيذ الرئيسي — التدريب الذاتي على 6 أشهر
+   271→// ============================================================
+   272→export async function runSelfTraining(requestedEpochs: number): Promise<SelfTrainingResult> {
+   273→  const epochsWanted = clamp(Math.floor(requestedEpochs), 2, MAX_EPOCHS);
+   274→
+   275→  // ---------- 1) البيانات: ساعة × 6 أشهر (احتياطي: يومي × سنتين) ----------
+   276→  let candles: Candle[] = [];
+   277→  let dataSource = "";
+   278→  let tf: "1h" | "1d" = "1h";
+   279→  let hold = 24; // بالشموع
+   280→
+   281→  try {
+   282→    candles = await fetchCandles("GC=F", "60m", "6mo");
+   283→    dataSource = "Yahoo Finance GC=F — 6 أشهر @ شمعة الساعة";
+   284→  } catch {
+   285→    candles = [];
+   286→  }
+   287→
+   288→  let startIdx = WARMUP_1H;
+   289→  if (candles.length < 800) {
+   290→    // وضع احتياطي: يومي — نستخدم آخر ~126 يوم تداول (≈6 أشهر)
+   291→    const daily = await fetchCandles("GC=F", "1d", "2y");
+   292→    if (daily.length < 260) {
+   293→      throw new Error(`بيانات غير كافية للتدريب (${daily.length} شمعة يومية)`);
+   294→    }
+   295→    candles = daily;
+   296→    tf = "1d";
+   297→    hold = 10;
+   298→    startIdx = Math.max(40, candles.length - 130);
+   299→    dataSource = "Yahoo Finance GC=F — وضع يومي احتياطي (آخر 6 أشهر)";
+   300→  }
+   301→
+   302→  const len = candles.length;
+   303→  if (len - startIdx < 60) throw new Error("نافذة التدريب ضيقة جداً — أعد المحاولة");
+   304→
+   305→  // ---------- 2) المؤشرات السببية (مرة واحدة) ----------
+   306→  const closes = candles.map((c) => c.c);
+   307→  const emaSet = computeEMASet(closes);
+   308→  const rsiArr = rsi(closes, 14);
+   309→  const macdData = macd(closes);
+   310→  const bbData = bollinger(closes);
+   311→  const atrData = atr(candles, 14);
+   312→  const adxArr = adxSeries(candles, 14);
+   313→  const atrAvg = rollingAvg(atrData.values, 50);
+   314→
+   315→  const bw: number[] = new Array(len).fill(NaN);
+   316→  for (let i = 0; i < len; i++) {
+   317→    const u = bbData.upper[i];
+   318→    const m = bbData.mid[i];
+   319→    if (!isNaN(u) && !isNaN(m) && m > 0) bw[i] = ((bbData.upper[i] - bbData.lower[i]) / m) * 100;
+   320→  }
+   321→  const bwAvg = rollingAvg(bw, 50);
+   322→  const { days, dayOf } = buildDays(candles);
+   323→
+   324→  const ctx: Ctx = {
+   325→    candles,
+   326→    closes,
+   327→    ema9: emaSet.ema9,
+   328→    ema21: emaSet.ema21,
+   329→    ema50: emaSet.ema50,
+   330→    ema200: emaSet.ema200,
+   331→    rsiArr,
+   332→    macdLine: macdData.line,
+   333→    macdSignal: macdData.signal,
+   334→    macdHist: macdData.histogram,
+   335→    bbUpper: bbData.upper,
+   336→    bbLower: bbData.lower,
+   337→    bw,
+   338→    bwAvg,
+   339→    atrArr: atrData.values,
+   340→    adxArr,
+   341→    days,
+   342→    dayOf,
+   343→  };
+   344→
+   345→  // ---------- 3) تصويت الاستراتيجيات عند كل شمعة (مستقل عن الأوزان) ----------
+   346→  const votesAll: Vote[][] = new Array(len);
+   347→  for (let i = startIdx; i < len - 1; i++) {
+   348→    votesAll[i] = evaluateAt(ctx, i);
+   349→  }
+   350→  const regimes: Regime[] = new Array(len);
+   351→  for (let i = startIdx; i < len; i++) regimes[i] = regimeAt(ctx, i);
+   352→
+   353→  // ذاكرة أيام الأحداث (لكل مفتاح يوم)
+   354→  const eventByDay = new Map<string, string | null>();
+   355→  function eventAt(i: number): string | null {
+   356→    const d = new Date(candles[i].t);
+   357→    const k = `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
+   358→    if (!eventByDay.has(k)) eventByDay.set(k, highImpactDay(candles[i].t));
+   359→    return eventByDay.get(k) ?? null;
+   360→  }
+   361→
+   362→  // ---------- 4) التوليفة الموزونة بالأوزان والمضاعفات ----------
+   363→  type MultMap = Record<string, Record<Regime, number>>;
+   364→  const initMults = (): MultMap => {
+   365→    const m: MultMap = {};
+   366→    for (const meta of STRATEGY_META) m[meta.key] = { trend_up: 1, trend_down: 1, range: 1 };
+   367→    return m;
+   368→  };
+   369→
+   370→  function runComposite(
+   371→    from: number,
+   372→    to: number,
+   373→    pillarW: Record<string, number>,
+   374→    mults: MultMap
+   375→  ): TrainerTrade[] {
+   376→    const trades: TrainerTrade[] = [];
+   377→    let busyUntil = -1;
+   378→    let lastAsianDay = -1;
+   379→    for (let i = from; i < to; i++) {
+   380→      if (i <= busyUntil) continue;
+   381→      const votes = votesAll[i] ?? [];
+   382→      if (!votes.length) continue;
+   383→      const reg = regimes[i];
+   384→      let num = 0;
+   385→      let den = 0;
+   386→      for (const v of votes) {
+   387→        const meta = META_BY_KEY.get(v.key);
+   388→        if (!meta) continue;
+   389→        const w = (pillarW[meta.pillar] / 100) * mults[v.key][reg];
+   390→        num += v.dir * w;
+   391→        den += w;
+   392→      }
+   393→      if (den <= 0) continue;
+   394→      const net = num / den;
+   395→      if (net < 0.15 && net > -0.15) continue;
+   396→      const dir: 1 | -1 = net >= 0 ? 1 : -1;
+   397→      const agreeing = votes.filter((v) => v.dir === dir);
+   398→      if (agreeing.length < 2) continue;
+   399→
+   400→      const hasAsian = agreeing.some((v) => v.key === "asian_breakout");
+   401→      if (hasAsian) {
+   402→        const d = dayOf[i];
+   403→        if (d === lastAsianDay) continue;
+   404→        lastAsianDay = d;
+   405→      }
+   406→
+   407→      const c = candles[i];
+   408→      const a = ctx.atrArr[i];
+   409→      if (isNaN(a) || a < 0.3) continue;
+   410→      const sl = dir === 1 ? c.c - 1.5 * a : c.c + 1.5 * a;
+   411→      const sim = simulate(candles, i, dir, sl, hold);
+   412→      if (!sim) continue;
+   413→      trades.push({
+   414→        i,
+   415→        t: candles[i].t,
+   416→        entryT: candles[i + 1].t,
+   417→        dir,
+   418→        entry: candles[i + 1].o,
+   419→        sl,
+   420→        tp1: candles[i + 1].o + dir * Math.abs(candles[i + 1].o - sl),
+   421→        result: sim.result,
+   422→        r: sim.r,
+   423→        bars: sim.bars,
+   424→        endIdx: sim.endIdx,
+   425→        confidence: clamp(Math.round(Math.abs(net) * 100), 15, 99),
+   426→        votes,
+   427→        regime: reg,
+   428→      });
+   429→      busyUntil = sim.endIdx;
+   430→    }
+   431→    return trades;
+   432→  }
+   433→
+   434→  // ---------- 5) الإسناد: من أصاب ومن أخطأ في كل صفقة ----------
+   435→  function attribute(trades: TrainerTrade[]): Map<string, { n: number; correct: number }> {
+   436→    const map = new Map<string, { n: number; correct: number }>();
+   437→    for (const t of trades) {
+   438→      for (const v of t.votes) {
+   439→        const participated = v.dir === t.dir;
+   440→        let correct: boolean | null = null;
+   441→        if (t.result === "win") correct = participated;
+   442→        else if (t.result === "loss") correct = !participated;
+   443→        else if (t.r > 0.05) correct = participated;
+   444→        else if (t.r < -0.05) correct = !participated;
+   445→        if (correct === null) continue;
+   446→        const key = `${v.key}|${t.regime}`;
+   447→        const s = map.get(key) ?? { n: 0, correct: 0 };
+   448→        s.n++;
+   449→        if (correct) s.correct++;
+   450→        map.set(key, s);
+   451→      }
+   452→    }
+   453→    return map;
+   454→  }
+   455→
+   456→  // ---------- 6) تحديث المضاعفات (التعلم الفعلي) ----------
+   457→  function updateMults(
+   458→    mults: MultMap,
+   459→    attribution: Map<string, { n: number; correct: number }>
+   460→  ): { key: string; nameAr: string; regime: Regime; from: number; to: number }[] {
+   461→    const changes: { key: string; nameAr: string; regime: Regime; from: number; to: number }[] = [];
+   462→    for (const meta of STRATEGY_META) {
+   463→      for (const reg of ["trend_up", "trend_down", "range"] as Regime[]) {
+   464→        const s = attribution.get(`${meta.key}|${reg}`);
+   465→        if (!s || s.n < 6) continue; // عينة صغيرة — لا تعلم
+   466→        const target = clamp(wilsonLower(s.correct, s.n) / 0.5, 0.55, 1.45);
+   467→        const old = mults[meta.key][reg];
+   468→        const next = clamp(old * 0.65 + target * 0.35, 0.5, 1.5);
+   469→        if (Math.abs(next - old) >= 0.03) {
+   470→          mults[meta.key][reg] = next;
+   471→          changes.push({ key: meta.key, nameAr: meta.nameAr, regime: reg, from: old, to: next });
+   472→        }
+   473→      }
+   474→    }
+   475→    return changes.sort((a, b) => Math.abs(b.to - b.from) - Math.abs(a.to - a.from));
+   476→  }
+   477→
+   478→  // ---------- 7) اشتقاق أوزان الأعمدة من مضاعفات الاستراتيجيات ----------
+   479→  function derivePillarWeights(mults: MultMap): Record<string, number> {
+   480→    const out: Record<string, number> = {};
+   481→    for (const p of PILLAR_KEYS) {
+   482→      let num = 0;
+   483→      let den = 0;
+   484→      for (const meta of STRATEGY_META) {
+   485→        if (meta.pillar !== p) continue;
+   486→        const m = (mults[meta.key].trend_up + mults[meta.key].trend_down + mults[meta.key].range) / 3;
+   487→        num += m;
+   488→        den++;
+   489→      }
+   490→      const pillarMult = den > 0 ? num / den : 1;
+   491→      out[p] = BASE_PILLAR_WEIGHTS[p] * pillarMult;
+   492→    }
+   493→    let sum = PILLAR_KEYS.reduce((a, k) => a + out[k], 0);
+   494→    for (const k of PILLAR_KEYS) out[k] = Math.max(6, out[k]);
+   495→    sum = PILLAR_KEYS.reduce((a, k) => a + out[k], 0);
+   496→    for (const k of PILLAR_KEYS) out[k] = r1((out[k] / sum) * 100);
+   497→    const sum2 = PILLAR_KEYS.reduce((a, k) => a + out[k], 0);
+   498→    out.trend = r1(out.trend + (100 - sum2)); // تصحيح كسور التقريب
+   499→    return out;
+   500→  }
+   501→
+   502→  // ---------- 8) حلقات التعلم (Epochs) على أول 75% ----------
+   503→  const split = startIdx + Math.floor((len - 1 - startIdx) * 0.75);
+   504→  let pillarW: Record<string, number> = { ...BASE_PILLAR_WEIGHTS } as Record<string, number>;
+   505→  const mults = initMults();
+   506→  const epochLog: TrainEpoch[] = [];
+   507→  let epochsRun = 0;
+   508→  let converged = false;
+   509→
+   510→  for (let e = 1; e <= epochsWanted; e++) {
+   511→    const trades = runComposite(startIdx, split, pillarW, mults);
+   512→    const st = statsOfTrades(trades);
+   513→    const attribution = attribute(trades);
+   514→    const changes = updateMults(mults, attribution);
+   515→    pillarW = derivePillarWeights(mults);
+   516→
+   517→    const top = changes.slice(0, 2).map((c) => {
+   518→      const dirTxt = c.to > c.from ? "رُفع" : "خُفض";
+   519→      const regAr = REGIME_AR[c.regime];
+   520→      return `${dirTxt} مضاعف «${c.nameAr}» في ${regAr} من ${r2(c.from)} إلى ${r2(c.to)}`;
+   521→    });
+   522→    const prev = epochLog[epochLog.length - 1];
+   523→    let note: string;
+   524→    if (!prev) {
+   525→      note = `الحلقة الأولى: ${st.trades} توقعاً أعمى على فترة التعلم — دقة ${r1(st.winRate * 100)}%. ${
+   526→        top.length ? `أول تعديلات: ${top.join("، ")}.` : "لا تعديلات جوهرية بعد (عينات صغيرة)."
+   527→      }`;
+   528→    } else {
+   529→      const delta = (st.winRate - prev.winRate) * 100;
+   530→      note = `الحلقة ${e}: دقة ${r1(st.winRate * 100)}% (${delta >= 0 ? "+" : ""}${r1(delta)} نقطة عن الحلقة السابقة). ${
+   531→        top.length ? top.join("، ") + "." : "الأوزان مستقرة تقريباً."
+   532→      }`;
+   533→    }
+   534→    epochLog.push({
+   535→      epoch: e,
+   536→      trades: st.trades,
+   537→      winRate: r1(st.winRate * 100),
+   538→      profitFactor: st.profitFactor,
+   539→      expectancyR: st.expectancyR,
+   540→      grossR: st.grossR,
+   541→      weightsSnapshot: { ...pillarW },
+   542→      multSnapshot: Object.fromEntries(
+   543→        STRATEGY_META.map((m) => [
+   544→          m.key,
+   545→          r2((mults[m.key].trend_up + mults[m.key].trend_down + mults[m.key].range) / 3),
+   546→        ])
+   547→      ),
+   548→      note,
+   549→    });
+   550→    epochsRun = e;
+   551→
+   552→    // استقرار التعلم
+   553→    if (e >= 3 && prev) {
+   554→      const prev2 = epochLog[epochLog.length - 3];
+   555→      const d1 = Math.abs(st.winRate - prev.winRate) * 100;
+   556→      const d2 = Math.abs(st.winRate - prev2.winRate) * 100;
+   557→      if (d1 < MIN_CONVERGENCE && d2 < MIN_CONVERGENCE * 1.5) {
+   558→        converged = true;
+   559→        break;
+   560→      }
+   561→    }
+   562→  }
+   563→
+   564→  // ---------- 9) الاختبار الأعمى الصارم: آخر 25% (لم ترها حلقات التعلم) ----------
+   565→  const tradesBeforeH = runComposite(split, len - 1, { ...BASE_PILLAR_WEIGHTS } as Record<string, number>, initMults());
+   566→  const tradesAfterH = runComposite(split, len - 1, pillarW, mults);
+   567→  const stBeforeH = statsOfTrades(tradesBeforeH);
+   568→  const stAfterH = statsOfTrades(tradesAfterH);
+   569→  const improvement = (stAfterH.winRate - stBeforeH.winRate) * 100;
+   570→
+   571→  let verdict: string;
+   572→  if (stAfterH.trades < 8) {
+   573→    verdict = "عدد تنبؤات في فترة الاختبار صغير — النتيجة استرشادية فقط.";
+   574→  } else if (improvement > 3) {
+   575→    verdict = `التدريب حسّن الأداء فعلياً: +${r1(improvement)}% فوز على بيانات لم يرها البوت إطلاقاً أثناء التعلم ✓`;
+   576→  } else if (improvement < -3) {
+   577→    verdict = `تنبيه: الأوزان المتعلمة أداءها أدنى بـ${r1(Math.abs(improvement))}% على الفترة الأعمى — علامة فرط تجهيز، جرّب تقليل الحلقات.`;
+   578→  } else {
+   579→    verdict = `أداء مقارب (+${r1(improvement)}%) — الأوزان المتعلمة آمنة الاستخدام ولم تضر الأداء خارج العينة.`;
+   580→  }
+   581→
+   582→  // ---------- 10) الجولة النهائية على كامل 6 أشهر بالأوزان المتعلمة ----------
+   583→  const finalTrades = runComposite(startIdx, len - 1, pillarW, mults);
+   584→  const finalStats = statsOfTrades(finalTrades);
+   585→  const finalAttribution = attribute(finalTrades);
+   586→  const equity = equityOf(finalTrades).slice(0, 400); // سلسلة مضغوطة
+   587→
+   588→  // حفظ حالة التعلم ليمتد إليها محرك الإشارة المباشر
+   589→  setLearnedState({
+   590→    weights: pillarW,
+   591→    stats: {
+   592→      winRate: finalStats.winRate,
+   593→      trades: finalStats.trades,
+   594→      profitFactor: finalStats.profitFactor,
+   595→      expectancyR: finalStats.expectancyR,
+   596→      maxDrawdownR: finalStats.maxDrawdownR,
+   597→      tf,
+   598→      from: new Date(candles[startIdx].t).toISOString(),
+   599→      to: new Date(candles[len - 1].t).toISOString(),
+   600→      updatedAt: new Date().toISOString(),
+   601→    },
+   602→    tf,
+   603→    ts: Date.now(),
+   604→  });
+   605→
+   606→  // ---------- 11) التفسير الذاتي (قلب الطلب: "يعطي تفسير لنفسه") ----------
+   607→  const LOSS_TAG_LESSONS: Record<string, { title: string; did: string }> = {
+   608→    counter_trend: {
+   609→      title: "الإشارات المعاكسة للاتجاه العام (ضد EMA200) خطرها أعلى",
+   610→      did: "خُفضت مضاعفات الاستراتيجيات الانعكاسية عند تعارضها مع EMA200",
+   611→    },
+   612→    range: {
+   613→      title: "الأسواق العرضية (ADX أقل من 20) تُفشل استراتيجيات الاختراق والاتجاه",
+   614→      did: "مضاعفات الاتجاه/الاختراق في نظام «سوق عرضي» خُفضت حلقة بعد حلقة",
+   615→    },
+   616→    vol: {
+   617→      title: "توسع التقلب (ATR فوق 130% من متوسطه) يبتلع الأوقاف الضيقة",
+   618→      did: "البوت يحاسب مسافة الوقف بمقياس ATR آلياً في إشاراته المباشرة",
+   619→    },
+   620→    news: {
+   621→      title: "أيام البيانات عالية التأثير (NFP / CPI / FOMC) تُطفئ الإشارات الفنية",
+   622→      did: "البوت يعرض تحذيراً خبرياً ويعتدل في الثقة قبل وأثناء هذه الأيام",
+   623→    },
+   624→    ob: {
+   625→      title: "الشراء في التشبع الشرائي والبيع في التشبع البيعي يواجهان ارتداداً حاداً",
+   626→      did: "خُفض وزن إشارات RSI المتطرفة عند تعارض الاتجاه",
+   627→    },
+   628→    weak: {
+   629→      title: "التوافق المحدود (استراتيجيتان فقط) يعني إشارة أقل نضجاً",
+   630→      did: "البوت يجعل الثقة متناسبة مع قوة التوافق فيصل التصفية إلى الإشارات الضعيفة",
+   631→    },
+   632→    generic: {
+   633→      title: "جزء من الخسائر ضجيج طبيعي بلا سبب هيكلي — التوزيع الطبيعي للتداول",
+   634→      did: "الالتزام بوقف 1R حصر الأضرار وحمى رأس المال",
+   635→    },
+   636→  };
+   637→
+   638→  function lossCausesOf(t: TrainerTrade): { tag: string; text: string }[] {
+   639→    const i = t.i;
+   640→    const c = candles[i];
+   641→    const causes: { tag: string; text: string }[] = [];
+   642→    const adx = ctx.adxArr[i];
+   643→    const rsiNow = ctx.rsiArr[i];
+   644→    const a = ctx.atrArr[i];
+   645→    const avgA = atrAvg[i];
+   646→    const atrR = !isNaN(avgA) && avgA > 0 ? a / avgA : 1;
+   647→    const e200 = ctx.ema200[i];
+   648→
+   649→    if (!isNaN(e200) && t.dir === 1 && c.c < e200)
+   650→      causes.push({ tag: "counter_trend", text: `الدخول الشرائي جاء والسعر تحت EMA200 — إشارة انعكاسية ضد الاتجاه العام الكلي، وهذا النوع أضعف إحصائياً` });
+   651→    if (!isNaN(e200) && t.dir === -1 && c.c > e200)
+   652→      causes.push({ tag: "counter_trend", text: `الدخول البيعي جاء والسعر فوق EMA200 — بيع ضد الاتجاه العام الكلي` });
+   653→    if (!isNaN(adx) && adx < 20)
+   654→      causes.push({ tag: "range", text: `سوق عرضي (ADX=${adx.toFixed(0)}) — استراتيجيات الاختراق والاتجاه تفشل غالباً بلا اتجاه واضح` });
+   655→    if (atrR > 1.3)
+   656→      causes.push({ tag: "vol", text: `توسع تقلب (ATR=${Math.round(atrR * 100)}% من متوسطه) تجاوز مسافة الوقف سريعاً` });
+   657→    const ev = eventAt(i);
+   658→    if (ev) causes.push({ tag: "news", text: `تزامن التوقيت مع ${ev} — التذبذب الخبري أثناء الإصدار أطفأ الإشارة الفنية` });
+   659→    if (t.dir === 1 && !isNaN(rsiNow) && rsiNow > 68)
+   660→      causes.push({ tag: "ob", text: `RSI=${rsiNow.toFixed(0)} في تشبع شرائي — الشراء عند هذه المستويات يواجه ارتداداً حاداً` });
+   661→    if (t.dir === -1 && !isNaN(rsiNow) && rsiNow < 32)
+   662→      causes.push({ tag: "ob", text: `RSI=${rsiNow.toFixed(0)} في تشبع بيعي — البيع عند هذه المستويات يواجه ارتداداً حاداً` });
+   663→    const agreeCount = t.votes.filter((v) => v.dir === t.dir).length;
+   664→    if (agreeCount < 3) causes.push({ tag: "weak", text: `توافق محدود (${agreeCount} استراتيجيات فقط) — إشارة أقل نضجاً` });
+   665→    if (!causes.length) causes.push({ tag: "generic", text: "لا سبب هيكلي واضح — خسارة ضمن التوزيع الطبيعي لضجيج السوق" });
+   666→    return causes;
+   667→  }
+   668→
+   669→  function buildExplanation(t: TrainerTrade): { text: string; lossTags: string[] } {
+   670→    const i = t.i;
+   671→    const c = candles[i];
+   672→    const dirAr = t.dir === 1 ? "شراء" : "بيع";
+   673→    const entryS = t.entry.toFixed(1);
+   674→    const agreeNames = t.votes.filter((v) => v.dir === t.dir).map((v) => META_BY_KEY.get(v.key)?.nameAr ?? v.key);
+   675→    const disagreeNames = t.votes.filter((v) => v.dir !== t.dir).map((v) => META_BY_KEY.get(v.key)?.nameAr ?? v.key);
+   676→    const adx = ctx.adxArr[i];
+   677→    const regAr = REGIME_AR[t.regime];
+   678→
+   679→    if (t.result === "win") {
+   680→      let factor: string;
+   681→      const e200 = ctx.ema200[i];
+   682→      if (!isNaN(e200) && ((t.dir === 1 && c.c > e200) || (t.dir === -1 && c.c < e200))) {
+   683→        factor = "العامل الأهم: الإشارة جاءت مع اتجاه EMA200 العام — التداول مع التيار يرفع احتمالية بلوغ الهدف.";
+   684→      } else if (!isNaN(adx) && adx >= 25) {
+   685→        factor = `العامل الأهم: قوة اتجاهية (ADX=${adx.toFixed(0)}) دعمت استمرار الحركة بعد الدخول.`;
+   686→      } else if (t.confidence >= 60) {
+   687→        factor = `العامل الأهم: توافق قوي (${t.confidence}%) بين الاستراتيجيات المتفقة.`;
+   688→      } else {
+   689→        factor = "العامل الأهم: انضباط الوقف/الهدف بمقياس ATR حصر المخاطرة وترك الربح يتحقق.";
+   690→      }
+   691→      return {
+   692→        text: `التنبؤ صحيح ✓ — إشارة ${dirAr} عند ${entryS}$ بلغت الهدف خلال ${t.bars} شمعة (+1R). شاركت ${agreeNames.length} استراتيجيات (${agreeNames.slice(0, 3).join("، ")}). النظام السوقي: ${regAr}${!isNaN(adx) ? ` (ADX=${adx.toFixed(0)})` : ""}. ${factor}`,
+   693→        lossTags: [],
+   694→      };
+   695→    }
+   696→
+   697→    if (t.result === "timeout") {
+   698→      return {
+   699→        text: `انتهاء مدة الانتظار — إشارة ${dirAr} عند ${entryS}$ أُغلقت على إغلاق الشمعة الأخيرة بنتيجة ${t.r >= 0 ? "+" : ""}${t.r}R خلال ${t.bars} شمعة. ${
+   700→          t.r > 0 ? "الاتجاه كان صحيحاً لكن الزخم لم يكفِ لبلوغ الهدف كاملاً." : "الحركة دخلت تجميداً عرضياً — أفضل من اصطدام الوقف."
+   701→        } النظام: ${regAr}.`,
+   702→        lossTags: [],
+   703→      };
+   704→    }
+   705→
+   706→    // خسارة — تحليل ذاتي للأسباب
+   707→    const chosen = lossCausesOf(t).slice(0, 2);
+   708→    const disagreeTxt = disagreeNames.length
+   709→      ? ` لاحظ البوت أن ${disagreeNames.slice(0, 2).join(" و")} صوتت عكس الإشارة — تجاهلها كان خطأ.`
+   710→      : "";
+   711→    const lessonTxt = chosen
+   712→      .map((cc) => LOSS_TAG_LESSONS[cc.tag]?.did ?? "")
+   713→      .filter(Boolean)
+   714→      .join("؛ ");
+   715→    return {
+   716→      text: `التنبؤ خاطئ ✗ — إشارة ${dirAr} عند ${entryS}$ اصطدمت وقف الخسارة (-1R خلال ${t.bars} شمعة). تحليل البوت لخطئه: ${chosen.map((cc) => cc.text).join("؛ ")}.${disagreeTxt} الدرس المطبّق: ${lessonTxt}`,
+   717→      lossTags: chosen.map((cc) => cc.tag),
+   718→    };
+   719→  }
+   720→
+   721→  // ---------- 12) الخط الزمني للتنبؤات (إعادة تشغيل تفاعلي) ----------
+   722→  const timeline: TrainTimelineEntry[] = [];
+   723→  const stride = finalTrades.length > 240 ? Math.ceil(finalTrades.length / 240) : 1;
+   724→  for (let k = 0; k < finalTrades.length; k += stride) {
+   725→    const t = finalTrades[k];
+   726→    const d = new Date(t.t);
+   727→    const dateLabel = `${d.getUTCDate()} ${AR_MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()} · ${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())} UTC`;
+   728→    const { text, lossTags } = buildExplanation(t);
+   729→    const exitPrice =
+   730→      t.result === "win" ? t.tp1 : t.result === "loss" ? t.sl : candles[Math.min(t.endIdx, len - 1)].c;
+   731→    timeline.push({
+   732→      i: t.i,
+   733→      t: t.t,
+   734→      dateLabel,
+   735→      phase: t.i < split ? "train" : "holdout",
+   736→      dir: t.dir === 1 ? "BUY" : "SELL",
+   737→      entry: r1(t.entry),
+   738→      sl: r1(t.sl),
+   739→      tp1: r1(t.tp1),
+   740→      confidence: t.confidence,
+   741→      agreeing: t.votes.filter((v) => v.dir === t.dir).map((v) => META_BY_KEY.get(v.key)?.nameAr ?? v.key),
+   742→      disagreeing: t.votes.filter((v) => v.dir !== t.dir).map((v) => META_BY_KEY.get(v.key)?.nameAr ?? v.key),
+   743→      regime: t.regime,
+   744→      regimeAr: REGIME_AR[t.regime],
+   745→      eventDay: eventAt(t.i),
+   746→      result: t.result,
+   747→      r: t.r,
+   748→      bars: t.bars,
+   749→      exitPrice: r1(exitPrice),
+   750→      explanation: text,
+   751→      lossTags,
+   752→    });
+   753→  }
+   754→
+   755→  // ---------- 13) جدول الاستراتيجيات بمضاعفاتها ----------
+   756→  const strategies: StrategyMult[] = STRATEGY_META.map((meta) => {
+   757→    let n = 0;
+   758→    let correct = 0;
+   759→    for (const reg of ["trend_up", "trend_down", "range"] as Regime[]) {
+   760→      const s = finalAttribution.get(`${meta.key}|${reg}`);
+   761→      if (s) {
+   762→        n += s.n;
+   763→        correct += s.correct;
+   764→      }
+   765→    }
+   766→    return {
+   767→      key: meta.key,
+   768→      nameAr: meta.nameAr,
+   769→      pillarAr: meta.pillarAr,
+   770→      global: r2((mults[meta.key].trend_up + mults[meta.key].trend_down + mults[meta.key].range) / 3),
+   771→      trendUp: r2(mults[meta.key].trend_up),
+   772→      trendDown: r2(mults[meta.key].trend_down),
+   773→      range: r2(mults[meta.key].range),
+   774→      samples: n,
+   775→      winRate: n ? r1((correct / n) * 100) : 0,
+   776→    };
+   777→  }).sort((a, b) => b.samples - a.samples);
+   778→
+   779→  // ---------- 14) الدروس المستخلصة (مجمعة من كل الخسائر) ----------
+   780→  const lessons: TrainLesson[] = [];
+   781→  {
+   782→    const tagCounts = new Map<string, number>();
+   783→    for (const t of finalTrades) {
+   784→      if (t.result !== "loss") continue;
+   785→      for (const tag of lossCausesOf(t).map((cc) => cc.tag)) {
+   786→        tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1);
+   787→      }
+   788→    }
+   789→    for (const [tag, count] of [...tagCounts.entries()].sort((a, b) => b[1] - a[1])) {
+   790→      if (count < 2) continue;
+   791→      const L = LOSS_TAG_LESSONS[tag];
+   792→      if (!L) continue;
+   793→      lessons.push({ key: tag, text: `${L.title} (${count} حالة) — ${L.did}.`, count, severity: "warn" });
+   794→    }
+   795→  }
+   796→
+   797→  // ---------- 15) المعايرة: هل الثقة العالية تعني فوزاً أعلى؟ ----------
+   798→  let lowN = 0, lowW = 0, midN = 0, midW = 0, highN = 0, highW = 0;
+   799→  for (const t of finalTrades) {
+   800→    const correct = t.result === "win" || (t.result === "timeout" && t.r > 0.05);
+   801→    if (t.confidence < 45) { lowN++; if (correct) lowW++; }
+   802→    else if (t.confidence <= 65) { midN++; if (correct) midW++; }
+   803→    else { highN++; if (correct) highW++; }
+   804→  }
+   805→  const lowWr = lowN ? lowW / lowN : 0;
+   806→  const midWr = midN ? midW / midN : 0;
+   807→  const highWr = highN ? highW / highN : 0;
+   808→  const calibVerdict =
+   809→    highN >= 10 && lowN >= 10
+   810→      ? highWr - lowWr > 0.08
+   811→        ? "معايرة جيدة ✓: توقعات الثقة العالية تتفوق فعلاً على منخفضة الثقة"
+   812→        : "الثقة تحتاج معايرة: لا فارق واضح بين مستويات الثقة"
+   813→      : "عينات المعايرة غير كافية للحكم";
+   814→
+   815→  // ---------- 16) ملاحظات الأنظمة السوقية ----------
+   816→  const regimeNotes: string[] = [];
+   817→  for (const reg of ["trend_up", "trend_down", "range"] as Regime[]) {
+   818→    const rt = finalTrades.filter((t) => t.regime === reg);
+   819→    if (!rt.length) {
+   820→      regimeNotes.push(`${REGIME_AR[reg]}: لم تتولد إشارات كافية`);
+   821→      continue;
+   822→    }
+   823→    const wr = rt.filter((t) => t.result === "win").length / rt.length;
+   824→    regimeNotes.push(
+   825→      `${REGIME_AR[reg]}: ${rt.length} تنبؤاً — دقة ${r1(wr * 100)}% — ${
+   826→        wr >= 0.55 ? "بيئة مواتية لاستراتيجيات البوت" : wr >= 0.45 ? "أداء متوسط" : "بيئة صعبة — البوت يقلص نشاطه فيها"
+   827→      }`
+   828→    );
+   829→  }
+   830→
+   831→  // ---------- 17) تحليل الشهور (الشهر الحالي + السابق + كل الأشهر) ----------
+   832→  const months: BtMonth[] = [];
+   833→  {
+   834→    interface MonthAgg { ym: string; open: number; close: number; high: number; low: number }
+   835→    const byMonth = new Map<string, MonthAgg>();
+   836→    const order: string[] = [];
+   837→    for (let i = startIdx; i < len; i++) {
+   838→      const d = new Date(candles[i].t);
+   839→      const ym = `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}`;
+   840→      let agg = byMonth.get(ym);
+   841→      if (!agg) {
+   842→        agg = { ym, open: candles[i].o, close: candles[i].c, high: -Infinity, low: Infinity };
+   843→        byMonth.set(ym, agg);
+   844→        order.push(ym);
+   845→      }
+   846→      agg.close = candles[i].c;
+   847→      agg.high = Math.max(agg.high, candles[i].h);
+   848→      agg.low = Math.min(agg.low, candles[i].l);
+   849→    }
+   850→    for (const ym of order) {
+   851→      const agg = byMonth.get(ym)!;
+   852→      const mt = finalTrades.filter((t) => {
+   853→        const d = new Date(t.t);
+   854→        return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}` === ym;
+   855→      });
+   856→      const mWins = mt.filter((t) => t.result === "win").length;
+   857→      const buys = mt.filter((t) => t.dir === 1).length;
+   858→      const sells = mt.length - buys;
+   859→      const [y, m] = ym.split("-");
+   860→      months.push({
+   861→        ym,
+   862→        label: `${AR_MONTHS[parseInt(m, 10) - 1]} ${y}`,
+   863→        open: r1(agg.open),
+   864→        high: r1(agg.high),
+   865→        low: r1(agg.low),
+   866→        close: r1(agg.close),
+   867→        changePct: r1(((agg.close - agg.open) / agg.open) * 100),
+   868→        atrAvg: 0,
+   869→        trades: mt.length,
+   870→        wins: mWins,
+   871→        wr: mt.length ? r1((mWins / mt.length) * 100) : 0,
+   872→        dominant: buys > sells * 1.3 ? "BUY" : sells > buys * 1.3 ? "SELL" : "متوازن",
+   873→      });
+   874→    }
+   875→  }
+   876→
+   877→  // ---------- 18) المعرفة الذاتية ----------
+   878→  const withStats = strategies.filter((s) => s.samples >= 12);
+   879→  const bestS = withStats.slice().sort((a, b) => b.winRate - a.winRate)[0] ?? null;
+   880→  const worstS = withStats.slice().sort((a, b) => a.winRate - b.winRate)[0] ?? null;
+   881→
+   882→  if (bestS) {
+   883→    lessons.push({
+   884→      key: "best",
+   885→      text: `أقوى سلاح حالياً: «${bestS.nameAr}» — إصابة ${bestS.winRate}% عبر ${bestS.samples} مشاركة في التوليفة. البوت يرفع وزنها تدريجياً.`,
+   886→      count: bestS.samples,
+   887→      severity: "good",
+   888→    });
+   889→  }
+   890→  lessons.push({
+   891→    key: "calibration",
+   892→    text: `${calibVerdict}${
+   893→      highN >= 10 && lowN >= 10 ? ` (دقة الثقة العالية ${r1(highWr * 100)}% مقابل ${r1(lowWr * 100)}% للمنخفضة)` : ""
+   894→    }.`,
+   895→    count: highN,
+   896→    severity: highWr > lowWr + 0.08 ? "good" : "info",
+   897→  });
+   898→  lessons.push({
+   899→    key: "holdout",
+   900→    text: `الاختبار الأعمى (آخر 25% من الفترة — لم يرها البوت إطلاقاً أثناء التعلم): ${verdict}`,
+   901→    count: stAfterH.trades,
+   902→    severity: improvement >= 0 ? "good" : "info",
+   903→  });
+   904→
+   905→  const summary = `تدرّب البوت على ${(len - startIdx).toLocaleString("en-US")} شمعة ${
+   906→    tf === "1h" ? "ساعة" : "يومية"
+   907→  } تغطي نحو 6 أشهر، وأنجز ${finalStats.trades} توقعاً أعمى عبر ${epochsRun} ${
+   908→    epochsRun === 1 ? "حلقة تعلم" : "حلقات تعلم"
+   909→  }${converged ? " (استقر التعلم مبكراً)" : ""}. دقة التنبؤ على كامل الفترة ${r1(
+   910→    finalStats.winRate * 100
+   911→  )}%، وفي فترة الاختبار الأعمى ${r1(stAfterH.winRate * 100)}% مقابل ${r1(
+   912→    stBeforeH.winRate * 100
+   913→  )}% بالأوزان الأساسية قبل التدريب. أقوى استراتيجية: ${
+   914→    bestS ? `«${bestS.nameAr}» بإصابة ${bestS.winRate}%` : "غير محددة بعينة كافية"
+   915→  }؛ الأضعف: ${worstS ? `«${worstS.nameAr}» بإصابة ${worstS.winRate}%` : "غير محددة"}. استخلص ${
+   916→    lessons.length
+   917→  } درساً يضبط بها أوزانه المباشرة.`;
+   918→
+   919→  // ---------- 19) مستوى التدريب ----------
+   920→  const epochsPart = Math.min(35, epochsRun * 6);
+   921→  const holdoutPart = clamp(improvement * 1.5, -15, 20);
+   922→  const sep = highN >= 10 && lowN >= 10 ? (highWr - lowWr) * 100 : 0;
+   923→  const calibPart = sep > 5 ? clamp(sep, 5, 15) : 0;
+   924→  const coveragePart = finalStats.trades >= 80 ? 10 : Math.round(finalStats.trades / 8);
+   925→  const lessonsPart = Math.min(10, lessons.length * 2);
+   926→  const score = clamp(Math.round(epochsPart + holdoutPart + calibPart + coveragePart + lessonsPart), 0, 100);
+   927→  const label =
+   928→    score < 30 ? "مبتدئ" : score < 50 ? "متدرب" : score < 68 ? "متدرب جيداً" : score < 84 ? "متدرب متقدم" : "خبير متدرّب جداً";
+   929→
+   930→  // ---------- 20) النتيجة النهائية ----------
+   931→  return {
+   932→    tf,
+   933→    epochsRun,
+   934→    requestedEpochs: epochsWanted,
+   935→    converged,
+   936→    generatedAt: new Date().toISOString(),
+   937→    dataSource,
+   938→    window: {
+   939→      from: new Date(candles[startIdx].t).toISOString(),
+   940→      to: new Date(candles[len - 1].t).toISOString(),
+   941→      candles: len - startIdx,
+   942→      months: 6,
+   943→    },
+   944→    blindStats: finalStats,
+   945→    holdout: {
+   946→      tradesBefore: stBeforeH.trades,
+   947→      winRateBefore: r1(stBeforeH.winRate * 100),
+   948→      pfBefore: stBeforeH.profitFactor,
+   949→      expBefore: stBeforeH.expectancyR,
+   950→      tradesAfter: stAfterH.trades,
+   951→      winRateAfter: r1(stAfterH.winRate * 100),
+   952→      pfAfter: stAfterH.profitFactor,
+   953→      expAfter: stAfterH.expectancyR,
+   954→      equityBefore: equityOf(tradesBeforeH).slice(0, 300),
+   955→      equityAfter: equityOf(tradesAfterH).slice(0, 300),
+   956→      improvementPct: r1(improvement),
+   957→      verdict,
+   958→    },
+   959→    epochLog,
+   960→    equity,
+   961→    timeline,
+   962→    strategies,
+   963→    lessons,
+   964→    months,
+   965→    selfKnowledge: {
+   966→      blindAccuracy: r1(finalStats.winRate * 100),
+   967→      totalPredictions: finalStats.trades,
+   968→      bestStrategy: bestS?.nameAr ?? null,
+   969→      bestStrategyWr: bestS?.winRate ?? 0,
+   970→      worstStrategy: worstS?.nameAr ?? null,
+   971→      worstStrategyWr: worstS?.winRate ?? 0,
+   972→      calibration: {
+   973→        lowWr: r1(lowWr * 100),
+   974→        midWr: r1(midWr * 100),
+   975→        highWr: r1(highWr * 100),
+   976→        lowN,
+   977→        midN,
+   978→        highN,
+   979→        verdict: calibVerdict,
+   980→      },
+   981→      regimeNotes,
+   982→      summary,
+   983→    },
+   984→    trainingLevel: { score, label, epochsDone: epochsRun },
+   985→    weights: pillarW,
+   986→    weightsParam: weightsToParam(pillarW),
+   987→  };
+   988→}
+   989→

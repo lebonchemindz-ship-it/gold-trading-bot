@@ -12,7 +12,7 @@
 
 import { fetchCandles } from "./market";
 import { computeEMASet, rsi, macd, bollinger, atr } from "./indicators";
-import { BASE_PILLAR_WEIGHTS, PILLAR_KEYS, setLearnedState, weightsToParam } from "./learning";
+import { BASE_PILLAR_WEIGHTS, PILLAR_KEYS, setLearnedState, weightsToParam, persistTrainingResult } from "./learning";
 import {
   evaluateAt,
   simulate,
@@ -928,7 +928,7 @@ export async function runSelfTraining(requestedEpochs: number): Promise<SelfTrai
     score < 30 ? "مبتدئ" : score < 50 ? "متدرب" : score < 68 ? "متدرب جيداً" : score < 84 ? "متدرب متقدم" : "خبير متدرّب جداً";
 
   // ---------- 20) النتيجة النهائية ----------
-  return {
+  const finalResult: SelfTrainingResult = {
     tf,
     epochsRun,
     requestedEpochs: epochsWanted,
@@ -985,4 +985,16 @@ export async function runSelfTraining(requestedEpochs: number): Promise<SelfTrai
     weights: pillarW,
     weightsParam: weightsToParam(pillarW),
   };
+
+  // ---------- 21) حفظ التدريب على القرص (أفضل جهد) ----------
+  // يعمل محلياً: البوت يتذكر تدريبه حتى بعد إعادة تشغيل الخادم.
+  // على Vercel (ملفات للقراءة فقط): يُتجاهل بصمت ويبقى النموذج المُدمج هو المصدر.
+  try {
+    const saved = await persistTrainingResult(finalResult);
+    if (saved) console.log("[selftrainer] ✓ تم حفظ حالة التدريب على القرص — البوت يتذكر تدريبه بعد إعادة التشغيل");
+  } catch {
+    /* تجاهل — بيئة قراءة فقط */
+  }
+
+  return finalResult;
 }

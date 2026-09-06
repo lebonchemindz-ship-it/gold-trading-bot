@@ -2,10 +2,16 @@
 // وحدة التعلّم الذاتي — تخزين أوزان الأعمدة المشتقة من الباك-تيست
 // البوت يجرب استراتيجياته على شموع تاريخية (بدون نظرة مستقبلية)
 // ثم يعدّل أوزان الأعمدة وفق الأداء الفعلي المحقق (Wilson bound)
-// التخزين في ذاكرة الخادم (وحدة واحدة) + يمكن تمرير الأوزان من العميل
+// طبقتان للتخزين:
+//   1) ذاكرة الخادم (سريعة — عمرها عمر العملية)
+//   2) نموذج مدرب مُدمج في المستودع (trained-model.json) — يُحمّل
+//      عند الإقلاع ويصمد عبر إعادة التشغيل والنشر على Vercel
 // ============================================================
 
-import type { TrainingStats } from "./types";
+import { promises as fsp } from "fs";
+import path from "path";
+import persistedModel from "./trained-model.json";
+import type { TrainingStats, TrainTimelineEntryLike } from "./types";
 
 // المفاتيح السبعة للأعمدة — مطابقة تماماً لـ scoring.ts
 export const PILLAR_KEYS = [
@@ -38,15 +44,104 @@ export interface LearnedState {
   ts: number;
 }
 
-// ذاكرة الخادم — تعيش طوال عمر العملية (على Vercel: حتى إعادة التدوير)
+// الشكل المُدمج للنموذج المدرب (نتيجة تدريب كاملة + وصفات وصفية)
+interface PersistedModel {
+  version: number;
+  persistedAt: string;
+  note?: string;
+  result: {
+    tf: string;
+    epochsRun: number;
+    requestedEpochs: number;
+    converged: boolean;
+    generatedAt: string;
+    dataSource: string;
+    window: { from: string; to: string; candles: number; months: number };
+    blindStats: Record<string, number>;
+    holdout: Record<string, unknown>;
+    epochLog: unknown[];
+    equity: number[];
+    timeline: TrainTimelineEntryLike[];
+    strategies: unknown[];
+    lessons: unknown[];
+    months: unknown[];
+    selfKnowledge: Record<string, unknown>;
+    trainingLevel: { score: number; label: string; epochsDone: number };
+    weights: Record<string, number>;
+    weightsParam: string;
+  };
+}
+
+// ---------- تحويل النموذج المُدمج إلى حالة تعلم ----------
+function modelToState(m: PersistedModel): LearnedState {
+  const r = m.result;
+  const b = r.blindStats;
+  return {
+    weights: r.weights,
+    stats: {
+      winRate: typeof b.winRate === "number" && b.winRate <= 1 ? b.winRate : (b.winRate ?? 0) / 100,
+      trades: b.trades ?? 0,
+      profitFactor: b.profitFactor ?? 0,
+      expectancyR: b.expectancyR ?? 0,
+      maxDrawdownR: b.maxDrawdownR ?? 0,
+      tf: r.tf,
+      from: r.window?.from ?? "",
+      to: r.window?.to ?? "",
+      updatedAt: m.persistedAt,
+    },
+    tf: r.tf,
+    ts: new Date(m.persistedAt).getTime() || 0,
+  };
+}
+
+// ذاكرة الخادم — تعيش طوال عمر العملية
 let state: LearnedState | null = null;
+
+// النموذج المُدمج (يُدمج وقت البناء — يعمل على Vercel أيضاً)
+const persisted = persistedModel as unknown as PersistedModel;
 
 export function setLearnedState(next: LearnedState) {
   state = next;
 }
 
+/** حالة التعلم الفعالة: الذاكرة أولاً ثم النموذج المدرب المُدمج */
 export function getLearnedState(): LearnedState | null {
-  return state;
+  if (state) return state;
+  if (persisted?.result?.weights && persisted.result.tf) {
+    return modelToState(persisted);
+  }
+  return null;
+}
+
+/** النتيجة الكاملة للتدريب المحفوظ (لعرضها في الواجهة دون إعادة تدريب) */
+export function getPersistedTraining(): PersistedModel | null {
+  if (!persisted?.result?.weights) return null;
+  return persisted;
+}
+
+/** هل البوت مدرب حالياً (ذاكرة أو نموذج مُدمج)؟ */
+export function isTrained(): boolean {
+  return getLearnedState() != null;
+}
+
+// ---------- حفظ النتيجة الكاملة على القرص (أفضل جهد) ----------
+// يعمل محلياً فقط — على Vercel نظام الملفات للقراءة فقط فيُتجاهل بصمت،
+// ويبقى النموذج المُدمج (trained-model.json) هو مصدر الحقيقة في الإنتاج.
+const MODEL_PATH = path.join(process.cwd(), "src/lib/engine/trained-model.json");
+
+export async function persistTrainingResult(result: unknown): Promise<boolean> {
+  try {
+    const model = {
+      version: 1,
+      persistedAt: new Date().toISOString(),
+      note: "نموذج مدرب مسبقاً — تنبؤ أعمى ← تحقق ← تفسير ذاتي على 6 أشهر (Walk-Forward). يُحمّل تلقائياً عند إقلاع الخادم.",
+      result,
+    };
+    await fsp.writeFile(MODEL_PATH, JSON.stringify(model), "utf-8");
+    return true;
+  } catch {
+    return false; // للقراءة فقط (مثل Vercel) — لا مشكلة
+  }
 }
 
 // ---------- التحقق من صحة أوزان قادمة من العميل ----------

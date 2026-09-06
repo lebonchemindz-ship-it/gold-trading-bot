@@ -246,6 +246,30 @@ export interface TrainingInfo {
   note: string | null; // وصف عربي للتعلّم المطبق
 }
 
+// ---------- إدخال خط زمني للتدريب المحفوظ (شكل مبسّط للتخزين) ----------
+export interface TrainTimelineEntryLike {
+  i: number;
+  t: number;
+  dateLabel: string;
+  phase: string;
+  dir: string;
+  entry: number;
+  sl: number;
+  tp1: number;
+  confidence: number;
+  agreeing: string[];
+  disagreeing: string[];
+  regime: string;
+  regimeAr: string;
+  eventDay: string | null;
+  result: string;
+  r: number;
+  bars: number;
+  exitPrice: number;
+  explanation: string;
+  lossTags: string[];
+}
+
 // ---------- أخطاء ----------
 export class MarketDataError extends Error {
   constructor(message: string) {

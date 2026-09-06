@@ -21,6 +21,7 @@ import {
   GraduationCap,
   Lightbulb,
   ShieldCheck,
+  DatabaseBackup,
   Zap,
   Activity,
   TrendingUp,
@@ -414,12 +415,14 @@ export function TrainerPanel({
   error,
   onRun,
   applied,
+  persistedAt,
 }: {
   result: SelfTrainingResult | null;
   running: boolean;
   error: string | null;
   onRun: (epochs: number) => void;
   applied: boolean;
+  persistedAt?: string | null;
 }) {
   const [epochs, setEpochs] = useState(4);
 
@@ -456,6 +459,16 @@ export function TrainerPanel({
               <Badge variant="outline" className={cn("text-[10px] gap-1 px-2 py-1", levelStyle(result.trainingLevel.label))}>
                 <GraduationCap className="w-3.5 h-3.5" />
                 {result.trainingLevel.label} · {result.trainingLevel.score}/100
+              </Badge>
+            )}
+            {persistedAt && !running && (
+              <Badge
+                variant="outline"
+                className="text-[10px] border-amber-500/40 text-amber-400 bg-amber-500/5 gap-1"
+                title={`آخر تدريب محفوظ: ${new Date(persistedAt).toLocaleString("ar-EG")} — البوت يتذكر تدريبه حتى بعد إعادة تشغيل الخادم أو النشر`}
+              >
+                <DatabaseBackup className="w-3 h-3" />
+                مدرب ومحفوظ · {result?.epochsRun ?? 0} حلقة · {result?.blindStats.trades ?? 0} توقعاً أعمى
               </Badge>
             )}
             {applied && (

@@ -46,6 +46,7 @@ export default function GoldBotPage() {
   const [trainData, setTrainData] = useState<SelfTrainingResult | null>(null);
   const [trainRunning, setTrainRunning] = useState(false);
   const [trainError, setTrainError] = useState<string | null>(null);
+  const [trainPersistedAt, setTrainPersistedAt] = useState<string | null>(null); // متى حُفظ آخر تدريب على الخادم
   // تقرير الباك-تيست الفني التفصيلي (اختياري — بالزر)
   const [btData, setBtData] = useState<BacktestResult | null>(null);
   const [btRunning, setBtRunning] = useState(false);
@@ -107,6 +108,7 @@ export default function GoldBotPage() {
         if (!json.success) throw new Error(json.error ?? "فشل التدريب");
         const data = json.data as SelfTrainingResult;
         setTrainData(data);
+        setTrainPersistedAt(data.generatedAt ?? null);
         setTrainLevel({ label: data.trainingLevel.label, score: data.trainingLevel.score });
         const wp = json.weightsParam as string;
         // حفظ الأوزان المتعلمة لكل نمط + ملخص المستوى
@@ -184,10 +186,48 @@ export default function GoldBotPage() {
 
     load();
     autoTrainRef.current.add(mode);
-    // تدريب عميق تلقائي إن لم تكن هناك أوزان حديثة لهذا النمط
-    if (!fresh) {
-      runTraining(4, true);
-    }
+
+    // 1) البوت مدرب مسبقاً (نموذج محفوظ على الخادم)؟ — اعرض تدريبه فوراً
+    //    دون أي إعادة تدريب: هذا هو إثبات «قد تدرب بالفعل»
+    let trainedOnServer = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/train?status=1`, { cache: "no-store" });
+        const json = await res.json();
+        if (json.success && json.trained && json.data) {
+          trainedOnServer = true;
+          const data = json.data as SelfTrainingResult;
+          setTrainData(data);
+          setTrainLevel({ label: data.trainingLevel.label, score: data.trainingLevel.score });
+          setTrainPersistedAt((json.persistedAt as string) ?? data.generatedAt ?? null);
+          // اعتماد أوزان النموذج المدرب في هذه الجلسة
+          try {
+            localStorage.setItem(`goldbot:weights:${mode}`, json.weightsParam as string);
+            localStorage.setItem(`goldbot:weights:ts:${mode}`, String(Date.now()));
+            localStorage.setItem(
+              `goldbot:level:${mode}`,
+              JSON.stringify({ label: data.trainingLevel.label, score: data.trainingLevel.score, epochs: data.epochsRun })
+            );
+          } catch {
+            /* تجاهل أخطاء التخزين */
+          }
+          if (weightsParamRef.current) {
+            // أوزان محلية أحدث موجودة — أعِد الجلب بها
+            await load(false, weightsParamRef.current);
+          } else {
+            weightsParamRef.current = json.weightsParam as string;
+            await load(false, weightsParamRef.current);
+          }
+        }
+      } catch {
+        /* الخادم غير متاح — نكمل بالمسار العادي */
+      }
+
+      // 2) لا نموذج محفوظ ولا أوزان محلية حديثة؟ — تدريب عميق تلقائي
+      if (!trainedOnServer && !fresh) {
+        runTraining(4, true);
+      }
+    })();
   }, [mode, load, runTraining]);
 
   // ---------- التحديث التلقائي (كل دقيقة: إشارة + أخبار) ----------
@@ -458,6 +498,7 @@ export default function GoldBotPage() {
                       error={trainError}
                       onRun={(epochs) => runTraining(epochs, false)}
                       applied={trainingApplied}
+                      persistedAt={trainPersistedAt}
                     />
                   </div>
 
