@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { runSelfTraining } from "@/lib/engine/selftrainer";
+import { runSelfTraining, TrainingRange } from "@/lib/engine/selftrainer";
 import { getPersistedTraining, isTrained } from "@/lib/engine/learning";
 
 export const dynamic = "force-dynamic";
@@ -31,8 +31,13 @@ export async function GET(request: Request) {
 
     const epochsParam = url.searchParams.get("epochs") ?? "4";
     const epochs = Number(epochsParam);
+    const rangeParam = url.searchParams.get("range");
+    const range: TrainingRange = rangeParam === "2y" ? "2y" : "1y";
 
-    const result = await runSelfTraining(Number.isFinite(epochs) ? epochs : 4);
+    const result = await runSelfTraining(
+      Number.isFinite(epochs) ? epochs : 4,
+      { range }
+    );
 
     return NextResponse.json(
       {

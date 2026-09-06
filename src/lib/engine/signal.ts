@@ -252,8 +252,10 @@ export async function generateSignal(
   const dxyBias = dxy ? externalBias(dxy) : 0;
   const silverBias = silver ? externalBias(silver) : 0;
 
-  // 6) الجلسة والأخبار
-  const session = getSessionInfo(new Date(entry.candles[entry.candles.length - 1].t));
+  // 6) الجلسة والأخبار — من الوقت الحالي دائماً (يعرف البوت مواعيد الفتح/الإغلاق عند كل Refresh)
+  // الجلسة الحالية تعكس حالة السوق الفعلية الآن: نهاية الأسبوع → «السوق مغلق»،
+  // وساعات التداول → الجلسة الحية الصحيحة بغض النظر عن عمر آخر شمعة
+  const session = getSessionInfo(new Date());
   const now = Date.now();
   const usdNews = news.filter((e) => e.impact === "High");
   const upcoming = usdNews

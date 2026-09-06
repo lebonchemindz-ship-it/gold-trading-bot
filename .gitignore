@@ -71,3 +71,12 @@ yahoo_test.json
 news_test.json/
 # Vercel artifacts
 .vercel
+# ملفات تشغيل داخلية
+/3100
+/tool-results/
+dev-server.log
+dev-server.pid
+dev.log
+server.log
+prod-test.log
+scripts/trained-model-backup-*.json

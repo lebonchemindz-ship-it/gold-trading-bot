@@ -267,9 +267,19 @@ function equityOf(trades: TrainerTrade[]): number[] {
 }
 
 // ============================================================
-// التنفيذ الرئيسي — التدريب الذاتي على 6 أشهر
+// التنفيذ الرئيسي — التدريب الذاتي على شموع حقيقية (1y افتراضياً، 2y اختيارياً)
 // ============================================================
-export async function runSelfTraining(requestedEpochs: number): Promise<SelfTrainingResult> {
+export type TrainingRange = "1y" | "2y";
+
+export interface TrainingOptions {
+  /** نطاق البيانات: "1y" سنة كاملة (افتراضي) أو "2y" سنتان كاملتان — شموع أوسع وأعمق */
+  range?: TrainingRange;
+}
+
+export async function runSelfTraining(
+  requestedEpochs: number,
+  options: TrainingOptions = {}
+): Promise<SelfTrainingResult> {
   const epochsWanted = clamp(Math.floor(requestedEpochs), 2, MAX_EPOCHS);
 
   // ---------- 1) البيانات: ساعة × 6 أشهر (احتياطي: يومي × سنتين) ----------
@@ -278,11 +288,29 @@ export async function runSelfTraining(requestedEpochs: number): Promise<SelfTrai
   let tf: "1h" | "1d" = "1h";
   let hold = 24; // بالشموع
 
+  const range: TrainingRange = options.range === "2y" ? "2y" : "1y";
+
   try {
-    candles = await fetchCandles("GC=F", "60m", "1y");
-    dataSource = "Yahoo Finance GC=F — سنة كاملة @ شمعة الساعة";
+    candles = await fetchCandles("GC=F", "60m", range);
+    dataSource =
+      range === "2y"
+        ? "Yahoo Finance GC=F — سنتان كاملتان @ شمعة الساعة"
+        : "Yahoo Finance GC=F — سنة كاملة @ شمعة الساعة";
   } catch {
     candles = [];
+  }
+
+  // نطاق 2y لكن البيانات لم تزد (حدود المصدر): نطاق سليم بالبيانات المتاحة
+  if (range === "2y" && candles.length < 8000) {
+    try {
+      const oneYear = await fetchCandles("GC=F", "60m", "1y");
+      if (oneYear.length > candles.length) {
+        candles = oneYear;
+        dataSource = "Yahoo Finance GC=F — سنة كاملة @ شمعة الساعة (تعذر جلب السنتين)";
+      }
+    } catch {
+      // نُكمل بما لدينا
+    }
   }
 
   let startIdx = WARMUP_1H;
