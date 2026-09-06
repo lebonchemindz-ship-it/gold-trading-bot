@@ -31,7 +31,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ar" dir="rtl" suppressHydrationWarning>
+    <html lang="ar" dir="rtl" className="dark" suppressHydrationWarning>
       <body className={`${plexArabic.variable} font-sans antialiased bg-[#09090b] text-zinc-100`}>
         {children}
         <Toaster />

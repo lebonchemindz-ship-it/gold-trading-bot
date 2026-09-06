@@ -275,7 +275,7 @@ export default function GoldBotPage() {
               <h1 className="text-lg font-black tracking-tight text-zinc-50 leading-tight">
                 بوت الذهب <span className="text-amber-400">XAU/USD</span>
               </h1>
-              <p className="text-[11px] text-zinc-500">
+              <p className="text-[11px] text-zinc-300">
                 تحليل حتمي + أخبار + تدريب ذاتي على الشموع السابقة — سكالبينج ويومي
               </p>
             </div>
@@ -303,7 +303,7 @@ export default function GoldBotPage() {
                   </span>
                 </div>
                 {(signal?.dayHigh || signal?.dayLow) && (
-                  <div className="hidden md:flex items-center gap-2 text-[11px] text-zinc-500" dir="ltr">
+                  <div className="hidden md:flex items-center gap-2 text-[11px] text-zinc-300" dir="ltr">
                     <span>
                       H: <span className="text-emerald-500">{signal?.dayHigh}</span>
                     </span>
@@ -336,7 +336,7 @@ export default function GoldBotPage() {
                   {trainLevel.label}
                 </Badge>
               )}
-              <span className="text-[10px] text-zinc-600 tabular-nums hidden sm:inline">
+              <span className="text-[10px] text-zinc-300 tabular-nums hidden sm:inline">
                 تحديث تلقائي خلال {countdown}ث
               </span>
               <Button
@@ -361,13 +361,13 @@ export default function GoldBotPage() {
               <span className={cn("text-zinc-300", liveSession?.quality === 0 && "text-rose-300")}>
                 {stripSession.label}
               </span>
-              <span className="text-zinc-600">|</span>
-              <span className="text-zinc-500" dir="ltr">
+              <span className="text-zinc-400">|</span>
+              <span className="text-zinc-400" dir="ltr">
                 ATR: 15m {signal?.atr15m ?? "-"}$ · 1h {signal?.atr1h ?? "-"}$ · 4h {signal?.atr4h ?? "-"}$
               </span>
               {stripSession.active.length > 0 && (
                 <>
-                  <span className="text-zinc-600">|</span>
+                  <span className="text-zinc-400">|</span>
                   {stripSession.active.map((s) => (
                     <Badge key={s} variant="outline" className="text-[9px] px-1.5 py-0 border-zinc-700 text-zinc-400">
                       {s}
@@ -376,7 +376,7 @@ export default function GoldBotPage() {
                 </>
               )}
               {lastUpdate && (
-                <span className="text-zinc-600 mr-auto tabular-nums">آخر تحديث: {lastUpdate}</span>
+                <span className="text-zinc-400 mr-auto tabular-nums">آخر تحديث: {lastUpdate}</span>
               )}
             </div>
           </div>
@@ -394,6 +394,30 @@ export default function GoldBotPage() {
 
         {/* ساعة السوق — فتح/غلق + الجلسات */}
         <MarketClock />
+
+        {/* دليل الاستخدام السريع — كيف تقرأ توقع اليوم ونسبته */}
+        <div className="rounded-xl border border-amber-500/25 bg-gradient-to-l from-amber-500/10 via-zinc-900/60 to-zinc-900/60 px-4 py-3.5">
+          <div className="grid gap-2.5 md:grid-cols-3">
+            <div className="flex items-start gap-2.5">
+              <span className="shrink-0 w-6 h-6 rounded-full bg-amber-500/20 text-amber-300 flex items-center justify-center text-xs font-black">١</span>
+              <p className="text-[11.5px] leading-relaxed text-zinc-300">
+                <b className="text-zinc-100">افتح الموقع أو اضغط «تحديث»</b> — يقرأ البوت السعر والأخبار والجلسة الآن ويحسب توقع اليوم خلال ثوانٍ
+              </p>
+            </div>
+            <div className="flex items-start gap-2.5">
+              <span className="shrink-0 w-6 h-6 rounded-full bg-amber-500/20 text-amber-300 flex items-center justify-center text-xs font-black">٢</span>
+              <p className="text-[11.5px] leading-relaxed text-zinc-300">
+                <b className="text-zinc-100">اقرأ البطاقة الذهبية أعلى يمين</b> — الاتجاه (شراء/بيع/انتظار) + <b className="text-amber-300">نسبة الثقة %</b> + الدخول والوقف والأهداف
+              </p>
+            </div>
+            <div className="flex items-start gap-2.5">
+              <span className="shrink-0 w-6 h-6 rounded-full bg-amber-500/20 text-amber-300 flex items-center justify-center text-xs font-black">٣</span>
+              <p className="text-[11.5px] leading-relaxed text-zinc-300">
+                <b className="text-zinc-100">فسّر النسبة:</b> <span className="text-emerald-400">٧٥٪+</span> إشارة قوية · <span className="text-amber-300">٦٠-٧٤٪</span> متوسطة (نصف حجم) · <span className="text-zinc-300">أقل</span> انتظر
+              </p>
+            </div>
+          </div>
+        </div>
 
         {loading && !signal ? (
           <div className="flex flex-col gap-4">
@@ -528,7 +552,7 @@ export default function GoldBotPage() {
       {/* ===== التذييل ===== */}
       <footer className="mt-auto border-t border-zinc-800/80 bg-[#0c0c0f]">
         <div className="mx-auto max-w-7xl px-4 py-5 flex flex-col gap-3">
-          <div className="flex items-center justify-between flex-wrap gap-2 text-[11px] text-zinc-600">
+          <div className="flex items-center justify-between flex-wrap gap-2 text-[11px] text-zinc-300">
             <span className="flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
               مصدر البيانات: {signal?.dataSource ?? "Yahoo Finance + ForexFactory + RSS"}
@@ -542,7 +566,7 @@ export default function GoldBotPage() {
               </span>
             </span>
           </div>
-          <p className="text-[10px] leading-relaxed text-zinc-600 border-t border-zinc-800/60 pt-3">
+          <p className="text-[10px] leading-relaxed text-zinc-400 border-t border-zinc-800/60 pt-3">
             ⚠️ إخلاء مسؤولية: هذا البوت أداة تحليل تعليمية تعرض قراءة رياضية منضبطة للبيانات الفنية، وهو ليس
             نصيحة استثمارية مالية. تدريب البوت على الشموع التاريخية يحسّن معايرة الأوزان لكنه لا يضمن نتائج
             مستقبلية — أي بوت تداول لا يمكنه "عدم الخطأ". تداول الذهب بالرافعة ينطوي على مخاطر خسارة عالية وقد لا

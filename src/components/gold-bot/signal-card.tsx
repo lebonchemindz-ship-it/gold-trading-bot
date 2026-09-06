@@ -51,7 +51,7 @@ export function SignalCard({ signal }: { signal: SignalResponse }) {
               {dir === "WAIT" && <Pause className="w-7 h-7" />}
               {dir === "BUY" ? "شراء" : dir === "SELL" ? "بيع" : "انتظار"}
             </div>
-            <span className="text-xs text-zinc-500">
+            <span className="text-xs text-zinc-400">
               الدرجة الموزونة:{" "}
               <span
                 className={cn("font-bold tabular-nums", signal.score >= 0 ? "text-emerald-400" : "text-rose-400")}
@@ -113,7 +113,7 @@ export function SignalCard({ signal }: { signal: SignalResponse }) {
               valueClass="text-emerald-400"
             />
             <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2.5 flex flex-col justify-center">
-              <span className="text-[10px] text-zinc-500">مبدأ المخاطرة (من الأبحاث)</span>
+              <span className="text-[10px] text-zinc-300">مبدأ المخاطرة (من الأبحاث)</span>
               <span className="text-xs text-zinc-300 leading-relaxed mt-0.5">
                 خاطر بـ 1-2% فقط من الحساب، والوقف مبني على 1.35-2.2×ATR
               </span>
@@ -135,7 +135,7 @@ export function SignalCard({ signal }: { signal: SignalResponse }) {
           <ul className="flex flex-col gap-1.5">
             {signal.narrative.map((n, i) => (
               <li key={i} className="text-xs leading-relaxed text-zinc-300 flex gap-1.5">
-                <span className="text-zinc-600 shrink-0">◆</span>
+                <span className="text-zinc-400 shrink-0">◆</span>
                 <span>{n}</span>
               </li>
             ))}
@@ -173,14 +173,14 @@ function LevelBox({
 }) {
   return (
     <div className={cn("rounded-lg border bg-zinc-900/60 px-3 py-2.5", colorClass)}>
-      <span className="text-[10px] text-zinc-500 flex items-center gap-1">
+      <span className="text-[10px] text-zinc-300 flex items-center gap-1">
         {icon}
         {title}
       </span>
       <span className={cn("text-lg font-bold tabular-nums block", valueClass)} dir="ltr">
         ${value}
       </span>
-      <span className="text-[10px] text-zinc-500" dir="ltr">
+      <span className="text-[10px] text-zinc-300" dir="ltr">
         {sub}
       </span>
     </div>

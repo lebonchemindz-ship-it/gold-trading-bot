@@ -24,7 +24,7 @@ export function MethodologyPanel({ fingerprint }: { fingerprint: string }) {
             <BookOpen className="w-4 h-4 text-amber-400" />
             كيف يعمل البوت؟ (المنهجية الكاملة — بدون عشوائية)
           </CardTitle>
-          {open ? <ChevronUp className="w-4 h-4 text-zinc-500" /> : <ChevronDown className="w-4 h-4 text-zinc-500" />}
+          {open ? <ChevronUp className="w-4 h-4 text-zinc-400" /> : <ChevronDown className="w-4 h-4 text-zinc-400" />}
         </div>
       </CardHeader>
       {open && (
@@ -52,7 +52,7 @@ export function MethodologyPanel({ fingerprint }: { fingerprint: string }) {
                 <li key={t} className="leading-relaxed">
                   <span className="text-zinc-200 font-semibold">• {t}</span>
                   <br />
-                  <span className="text-zinc-500">{d}</span>
+                  <span className="text-zinc-400">{d}</span>
                 </li>
               ))}
             </ul>

@@ -67,14 +67,14 @@ function KpiCard({
           : "text-zinc-200";
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
-      <div className="flex items-center gap-1.5 text-[10px] text-zinc-500 mb-1">
+      <div className="flex items-center gap-1.5 text-[10px] text-zinc-300 mb-1">
         {icon}
         {label}
       </div>
       <div className={cn("text-lg font-black tabular-nums leading-none", toneCls)} dir="ltr">
         {value}
       </div>
-      {sub && <div className="text-[9px] text-zinc-600 mt-1">{sub}</div>}
+      {sub && <div className="text-[9px] text-zinc-300 mt-1">{sub}</div>}
     </div>
   );
 }
@@ -133,7 +133,7 @@ function StatsCompare({ before, after }: { before: BtStats; after: BtStats }) {
 function EquityChart({ equity }: { equity: number[] }) {
   if (equity.length < 2) {
     return (
-      <div className="h-40 flex items-center justify-center text-[11px] text-zinc-600">
+      <div className="h-40 flex items-center justify-center text-[11px] text-zinc-300">
         لا صفقات كافية لرسم المنحنى
       </div>
     );
@@ -171,7 +171,7 @@ function EquityChart({ equity }: { equity: number[] }) {
           strokeLinejoin="round"
         />
       </svg>
-      <div className="flex items-center justify-between text-[10px] text-zinc-600 mt-1">
+      <div className="flex items-center justify-between text-[10px] text-zinc-300 mt-1">
         <span>بداية فترة الاختبار</span>
         <span className={cn("tabular-nums", positive ? "text-amber-300" : "text-rose-400")}>
           الناتج التراكمي: {Math.round(final * 100) / 100}R
@@ -187,7 +187,7 @@ function StrategyTable({ strategies }: { strategies: BtStrategy[] }) {
     <div className="overflow-x-auto">
       <table className="w-full text-[11px]">
         <thead>
-          <tr className="text-zinc-500 border-b border-zinc-800">
+          <tr className="text-zinc-400 border-b border-zinc-800">
             <th className="text-right py-2 pr-2 font-medium">الاستراتيجية</th>
             <th className="text-right py-2 font-medium">العمود</th>
             <th className="py-2 font-medium">صفقات</th>
@@ -205,7 +205,7 @@ function StrategyTable({ strategies }: { strategies: BtStrategy[] }) {
             return (
               <tr key={s.key} className="border-b border-zinc-800/50 hover:bg-zinc-900/40">
                 <td className="py-2 pr-2 text-zinc-300">{s.nameAr}</td>
-                <td className="py-2 text-zinc-500">{s.pillarAr}</td>
+                <td className="py-2 text-zinc-400">{s.pillarAr}</td>
                 <td className="py-2 text-center tabular-nums text-zinc-400">{s.trades}</td>
                 <td className="py-2 text-center tabular-nums text-zinc-400">{s.wins}</td>
                 <td className="py-2 text-center">
@@ -237,7 +237,7 @@ function StrategyTable({ strategies }: { strategies: BtStrategy[] }) {
                       ×{mult} ↓
                     </span>
                   ) : (
-                    <span className="text-zinc-500 tabular-nums" dir="ltr">
+                    <span className="text-zinc-400 tabular-nums" dir="ltr">
                       ×1.00
                     </span>
                   )}
@@ -264,7 +264,7 @@ function WeightsBars({ base, learned }: { base: Record<string, number>; learned:
             <div className="flex items-center justify-between text-[10px] mb-1">
               <span className="text-zinc-400">{PILLAR_AR[k]}</span>
               <span className="tabular-nums" dir="ltr">
-                <span className="text-zinc-600">{b}</span>
+                <span className="text-zinc-400">{b}</span>
                 <span className="text-zinc-700"> → </span>
                 <span className={up ? "text-emerald-400 font-bold" : down ? "text-rose-400 font-bold" : "text-zinc-300"}>
                   {l}
@@ -288,7 +288,7 @@ function WeightsBars({ base, learned }: { base: Record<string, number>; learned:
           </div>
         );
       })}
-      <p className="text-[9px] text-zinc-600 mt-1">
+      <p className="text-[9px] text-zinc-300 mt-1">
         الشريط الرمادي = الوزن الأساسي (من البحث) — الشريط الملون = الوزن بعد التدريب على الشموع التاريخية (مجموع
         100)
       </p>
@@ -324,7 +324,7 @@ function MonthsCards({ months }: { months: BtMonth[] }) {
                 {m.changePct}%
               </span>
             </div>
-            <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px] text-zinc-500">
+            <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px] text-zinc-300">
               <span>
                 افتتاح: <span className="text-zinc-300 tabular-nums">{m.open}</span>
               </span>
@@ -347,7 +347,7 @@ function MonthsCards({ months }: { months: BtMonth[] }) {
                 </span>
               </span>
             </div>
-            <div className="mt-2 text-[10px] text-zinc-600 flex items-center gap-1.5">
+            <div className="mt-2 text-[10px] text-zinc-300 flex items-center gap-1.5">
               <CalendarRange className="w-3 h-3" />
               الميل الغالب:{" "}
               <span className={m.dominant === "BUY" ? "text-emerald-400/80" : m.dominant === "SELL" ? "text-rose-400/80" : "text-zinc-400"}>
@@ -367,7 +367,7 @@ function TradesTable({ trades }: { trades: BtTrade[] }) {
     <div className="overflow-x-auto max-h-[340px] overflow-y-auto">
       <table className="w-full text-[11px]">
         <thead className="sticky top-0 bg-[#101013]">
-          <tr className="text-zinc-500 border-b border-zinc-800">
+          <tr className="text-zinc-400 border-b border-zinc-800">
             <th className="text-right py-2 pr-2 font-medium">وقت الإشارة</th>
             <th className="py-2 font-medium">الاتجاه</th>
             <th className="text-right py-2 font-medium">الاستراتيجيات المتفقة</th>
@@ -390,7 +390,7 @@ function TradesTable({ trades }: { trades: BtTrade[] }) {
                   {t.dir === "BUY" ? "شراء" : "بيع"}
                 </span>
               </td>
-              <td className="py-2 text-zinc-500 text-[10px] max-w-[220px] truncate">{t.strategies.join(" + ")}</td>
+              <td className="py-2 text-zinc-400 text-[10px] max-w-[220px] truncate">{t.strategies.join(" + ")}</td>
               <td className="py-2 text-center tabular-nums text-zinc-300">{t.entry}</td>
               <td className="py-2 text-center tabular-nums text-rose-400/70">{t.sl}</td>
               <td className="py-2 text-center tabular-nums text-emerald-400/70">{t.tp1}</td>
@@ -404,7 +404,7 @@ function TradesTable({ trades }: { trades: BtTrade[] }) {
                     <XCircle className="w-3 h-3" /> خسارة
                   </span>
                 ) : (
-                  <span className="flex items-center justify-center gap-1 text-zinc-500">
+                  <span className="flex items-center justify-center gap-1 text-zinc-400">
                     <MinusCircle className="w-3 h-3" /> خروج زمني
                   </span>
                 )}
@@ -459,7 +459,7 @@ export function BacktestPanel({
                 </Badge>
               )}
             </h2>
-            <p className="text-[10px] text-zinc-500">
+            <p className="text-[10px] text-zinc-300">
               البوت يجرب استراتيجياته على شموع هذا الشهر + السابق دون رؤية النتائج، ثم يتحقق ويقوّي أوزانه
             </p>
           </div>
@@ -481,10 +481,10 @@ export function BacktestPanel({
 
       {/* شرح البروتوكول */}
       <details className="mb-4" open={!result}>
-        <summary className="text-[11px] text-zinc-400 cursor-pointer select-none mb-2">
+        <summary className="text-[11px] text-zinc-300 cursor-pointer select-none mb-2">
           كيف يتدرب البوت؟ (بروتوكول بلا نظرة مستقبلية)
         </summary>
-        <div className="grid gap-1.5 text-[11px] text-zinc-500 bg-zinc-900/40 border border-zinc-800/60 rounded-lg p-3 leading-relaxed">
+        <div className="grid gap-1.5 text-[11px] text-zinc-300 bg-zinc-900/40 border border-zinc-800/60 rounded-lg p-3 leading-relaxed">
           <p>
             <span className="text-amber-300 font-bold">1) المحاولة:</span> عند كل شمعة تاريخية يصدر البوت قراره
             بقراءة المؤشرات المحسوبة من الشموع السابقة فقط — يستحيل عليه رؤية ما سيحدث.
@@ -525,7 +525,7 @@ export function BacktestPanel({
       {result && (
         <div className="flex flex-col gap-4">
           {/* معلومات الفترة */}
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-zinc-500">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-zinc-300">
             <span className="flex items-center gap-1">
               <CalendarRange className="w-3 h-3" />
               الفترة: <span className="text-zinc-400" dir="ltr">
@@ -598,7 +598,7 @@ export function BacktestPanel({
           </div>
 
           {/* ملاحظات */}
-          <ul className="text-[10px] text-zinc-600 leading-relaxed border-t border-zinc-800/60 pt-2 flex flex-col gap-1">
+          <ul className="text-[10px] text-zinc-300 leading-relaxed border-t border-zinc-800/60 pt-2 flex flex-col gap-1">
             {result.notes.map((n, i) => (
               <li key={i}>• {n}</li>
             ))}

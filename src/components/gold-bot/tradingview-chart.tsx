@@ -123,7 +123,7 @@ export function TradingViewTechnicalGauge() {
     <div className="relative w-full h-[420px] rounded-xl border border-zinc-800 bg-[#0d0d10] overflow-hidden">
       <div ref={containerRef} className="tradingview-widget-container h-full w-full" />
       {failed && (
-        <div className="absolute inset-0 flex items-center justify-center bg-[#0d0d10] text-zinc-500 p-6 text-center text-sm">
+        <div className="absolute inset-0 flex items-center justify-center bg-[#0d0d10] text-zinc-400 p-6 text-center text-sm">
           أدوات TradingView التحليلية تحتاج اتصالاً خارجياً — ستظهر تلقائياً عند النشر على الإنترنت.
         </div>
       )}

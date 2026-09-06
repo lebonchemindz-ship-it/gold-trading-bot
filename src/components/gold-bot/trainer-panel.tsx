@@ -88,14 +88,14 @@ function KpiCard({
           : "text-zinc-100";
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
-      <div className="flex items-center gap-1.5 text-[10px] text-zinc-500 mb-1">
+      <div className="flex items-center gap-1.5 text-[10px] text-zinc-300 mb-1">
         {icon}
         {label}
       </div>
       <div className={cn("text-lg font-black tabular-nums leading-none", toneCls)} dir="ltr">
         {value}
       </div>
-      {sub && <div className="text-[9px] text-zinc-600 mt-1">{sub}</div>}
+      {sub && <div className="text-[9px] text-zinc-300 mt-1">{sub}</div>}
     </div>
   );
 }
@@ -150,7 +150,7 @@ function RunningIndicator() {
           {RUNNING_STEPS[step]}
         </motion.p>
       </AnimatePresence>
-      <p className="text-[10px] text-zinc-600">حلقة التدريب تعمل على الخادم — عادةً أقل من 15 ثانية</p>
+      <p className="text-[10px] text-zinc-300">حلقة التدريب تعمل على الخادم — عادةً أقل من 15 ثانية</p>
     </div>
   );
 }
@@ -212,13 +212,13 @@ function Playback({ timeline }: { timeline: TrainTimelineEntry[] }) {
           >
             <RotateCcw className="w-3 h-3" /> من البداية
           </Button>
-          <div className="flex items-center gap-1 text-[10px] text-zinc-500">
+          <div className="flex items-center gap-1 text-[10px] text-zinc-300">
             <FlaskConical className="w-3 h-3 text-amber-400/80" />
             <span dir="ltr">{idx + 1} / {total}</span>
           </div>
         </div>
         <div className="flex items-center gap-1.5">
-          <Gauge className="w-3 h-3 text-zinc-500" />
+          <Gauge className="w-3 h-3 text-zinc-400" />
           <Select value={String(speedMs)} onValueChange={(v) => setSpeedMs(Number(v))}>
             <SelectTrigger className="h-7 w-[92px] text-[10px] border-zinc-700 bg-zinc-900 text-zinc-300">
               <SelectValue />
@@ -265,7 +265,7 @@ function Playback({ timeline }: { timeline: TrainTimelineEntry[] }) {
         >
           {/* الرأس: التاريخ + المرحلة */}
           <div className="flex items-center justify-between flex-wrap gap-1.5">
-            <span className="text-[11px] text-zinc-400 font-medium" dir="ltr">{entry.dateLabel}</span>
+            <span className="text-[11px] text-zinc-300 font-medium" dir="ltr">{entry.dateLabel}</span>
             <div className="flex items-center gap-1.5">
               <Badge
                 variant="outline"
@@ -273,7 +273,7 @@ function Playback({ timeline }: { timeline: TrainTimelineEntry[] }) {
                   "text-[9px] px-1.5 py-0",
                   entry.phase === "holdout"
                     ? "border-emerald-500/40 text-emerald-400 bg-emerald-500/5"
-                    : "border-zinc-700 text-zinc-500"
+                    : "border-zinc-700 text-zinc-400"
                 )}
               >
                 {entry.phase === "holdout" ? "اختبار أعمى — لم يرها إطلاقاً" : "مرحلة التعلم"}
@@ -290,7 +290,7 @@ function Playback({ timeline }: { timeline: TrainTimelineEntry[] }) {
           <div className="flex items-center gap-3 flex-wrap">
             <div className="flex items-center gap-2">
               {!revealed && <EyeOff className="w-4 h-4 text-amber-400" />}
-              {revealed && <Eye className="w-4 h-4 text-zinc-500" />}
+              {revealed && <Eye className="w-4 h-4 text-zinc-400" />}
               <span
                 className={cn(
                   "text-sm font-black px-2.5 py-1 rounded-lg",
@@ -302,11 +302,11 @@ function Playback({ timeline }: { timeline: TrainTimelineEntry[] }) {
                 {entry.dir === "BUY" ? "شراء BUY" : "بيع SELL"}
               </span>
             </div>
-            <span className="text-[11px] text-zinc-500" dir="ltr">
+            <span className="text-[11px] text-zinc-300" dir="ltr">
               دخول <b className="text-zinc-300">${entry.entry}</b> · وقف <b className="text-rose-300">${entry.sl}</b> · هدف <b className="text-emerald-300">${entry.tp1}</b>
             </span>
             <div className="flex items-center gap-1.5 min-w-[120px] flex-1 max-w-[180px]">
-              <span className="text-[9px] text-zinc-600 shrink-0">ثقة {entry.confidence}%</span>
+              <span className="text-[9px] text-zinc-300 shrink-0">ثقة {entry.confidence}%</span>
               <MiniBar pct={entry.confidence} tone="gold" />
             </div>
           </div>
@@ -319,7 +319,7 @@ function Playback({ timeline }: { timeline: TrainTimelineEntry[] }) {
               </Badge>
             ))}
             {entry.disagreeing.length > 0 && (
-              <span className="text-[9px] text-zinc-600">
+              <span className="text-[9px] text-zinc-300">
                 معارضة: {entry.disagreeing.slice(0, 2).join("، ")}
               </span>
             )}
@@ -346,10 +346,10 @@ function Playback({ timeline }: { timeline: TrainTimelineEntry[] }) {
                   >
                     {entry.result === "win" ? "النتيجة: هدف تحقق ✓" : entry.result === "loss" ? "النتيجة: اصطدام الوقف ✗" : "النتيجة: انتهاء المدة"}
                   </span>
-                  <span className="text-[11px] text-zinc-500 tabular-nums" dir="ltr">
+                  <span className="text-[11px] text-zinc-300 tabular-nums" dir="ltr">
                     {entry.r >= 0 ? "+" : ""}{entry.r}R · خروج ${entry.exitPrice} · {entry.bars} شمعة
                   </span>
-                  <span className="text-[10px] text-zinc-600">{entry.regimeAr}</span>
+                  <span className="text-[10px] text-zinc-300">{entry.regimeAr}</span>
                 </div>
                 <div className="rounded-lg bg-zinc-950/60 border border-zinc-800/60 p-3">
                   <div className="flex items-center gap-1.5 text-[10px] text-amber-400/80 mb-1.5">
@@ -385,7 +385,7 @@ function Playback({ timeline }: { timeline: TrainTimelineEntry[] }) {
           {idx + 1}
         </span>
       </div>
-      <p className="text-[9px] text-zinc-600">
+      <p className="text-[9px] text-zinc-300">
         كل خطوة = توقع حقيقي سابق بترتيب زمني. {timeline.filter((e) => e.phase === "holdout").length} منها ضمن فترة الاختبار الأعمى (بأوزان لم تتعرض لبياناتها إطلاقاً).
       </p>
     </div>
@@ -398,7 +398,7 @@ function ResultChip({ entry }: { entry: TrainTimelineEntry }) {
       ? "bg-emerald-500/25 text-emerald-500"
       : entry.result === "loss"
         ? "bg-rose-500/25 text-rose-500"
-        : "bg-zinc-700/50 text-zinc-500";
+        : "bg-zinc-700/50 text-zinc-400";
   return (
     <span className={cn("w-5 h-5 rounded-md grid place-items-center text-[9px]", cls)} title={entry.dateLabel}>
       {entry.result === "win" ? "✓" : entry.result === "loss" ? "✗" : "–"}
@@ -447,7 +447,7 @@ export function TrainerPanel({
               <h2 className="text-base font-black text-zinc-50 leading-tight">
                 حلقة التدريب الذاتي العميق — سنة كاملة
               </h2>
-              <p className="text-[11px] text-zinc-500 mt-0.5 leading-relaxed max-w-xl">
+              <p className="text-[11px] text-zinc-300 mt-0.5 leading-relaxed max-w-xl">
                 يتنبأ على كل شمعة تاريخية <b className="text-amber-400/90">دون رؤية النتيجة</b> ← يكشفها ويتحقق ←
                 يفسّر لنفسه لماذا أصاب أو أخطأ ← يعدّل أوزان استراتيجياته ← ويعيد الحلقة حتى يستقر
               </p>
@@ -502,7 +502,7 @@ export function TrainerPanel({
             {running ? "يتدرب الآن…" : result ? "أعد التدريب" : "ابدأ تدريب البوت"}
           </Button>
           {result && (
-            <span className="text-[10px] text-zinc-600" dir="ltr">
+            <span className="text-[10px] text-zinc-300" dir="ltr">
               {result.window.candles.toLocaleString("en-US")} شمعة · {new Date(result.window.from).toLocaleDateString("ar-EG", { month: "short", day: "numeric" })} ←{" "}
               {new Date(result.window.to).toLocaleDateString("ar-EG", { month: "short", day: "numeric" })} · {result.tf === "1h" ? "فريم الساعة" : "فريم يومي"}
             </span>
@@ -527,7 +527,7 @@ export function TrainerPanel({
         {!result && !running && !error && (
           <div className="py-10 text-center">
             <BrainCircuit className="w-10 h-10 text-zinc-700 mx-auto mb-3" />
-            <p className="text-sm text-zinc-500">البوت لم يتدرب بعد في هذه الجلسة — اضغط «ابدأ تدريب البوت» ليتعلم من سنة كاملة سابقة</p>
+            <p className="text-sm text-zinc-400">البوت لم يتدرب بعد في هذه الجلسة — اضغط «ابدأ تدريب البوت» ليتعلم من سنة كاملة سابقة</p>
           </div>
         )}
 
@@ -595,10 +595,10 @@ export function TrainerPanel({
                   <GraduationCap className="w-4 h-4 text-amber-400" />
                   مستوى تدريب البوت
                 </span>
-                <span className="text-[11px] text-zinc-500" dir="ltr">{result.trainingLevel.score}/100</span>
+                <span className="text-[11px] text-zinc-300" dir="ltr">{result.trainingLevel.score}/100</span>
               </div>
               <MiniBar pct={result.trainingLevel.score} tone={result.trainingLevel.score >= 68 ? "good" : "gold"} />
-              <p className="text-[10px] text-zinc-600 mt-2">
+              <p className="text-[10px] text-zinc-300 mt-2">
                 الدرجة = عدد الحلقات + تحسن الاختبار الأعمى + معايرة الثقة + تغطية التوقعات + الدروس. ترفع الدرجة بإعادة التدريب بعدد حلقات أكبر.
               </p>
             </div>
@@ -637,7 +637,7 @@ export function TrainerPanel({
                         <MiniBar pct={e.winRate} tone={e.winRate >= 55 ? "good" : e.winRate >= 45 ? "gold" : "bad"} />
                       </div>
                     </div>
-                    <p className="text-[11px] text-zinc-500 mt-1.5 leading-relaxed">{e.note}</p>
+                    <p className="text-[11px] text-zinc-300 mt-1.5 leading-relaxed">{e.note}</p>
                   </div>
                 ))}
               </div>
@@ -656,7 +656,7 @@ export function TrainerPanel({
                   <KpiCard label="توقع الصفقة بعد" value={`${holdoutHold.expAfter}R`} sub={`قبل: ${holdoutHold.expBefore}R`} tone={holdoutHold.expAfter > 0 ? "good" : "bad"} icon={<Activity className="w-3 h-3" />} />
                   <KpiCard label="الحكم" value={`${holdoutHold.improvementPct >= 0 ? "+" : ""}${holdoutHold.improvementPct}%`} sub="فرق الفوز خارج العينة" tone={holdoutHold.improvementPct > 3 ? "good" : holdoutHold.improvementPct < -3 ? "bad" : "neutral"} icon={<Trophy className="w-3 h-3" />} />
                 </div>
-                <p className="text-[11px] text-zinc-500 mt-2 leading-relaxed rounded-lg bg-zinc-900/40 border border-zinc-800/60 p-2.5">
+                <p className="text-[11px] text-zinc-300 mt-2 leading-relaxed rounded-lg bg-zinc-900/40 border border-zinc-800/60 p-2.5">
                   {holdoutHold.verdict}
                 </p>
               </div>
@@ -671,7 +671,7 @@ export function TrainerPanel({
               <div className="rounded-xl border border-zinc-800 overflow-hidden overflow-x-auto">
                 <table className="w-full text-[11px]">
                   <thead>
-                    <tr className="bg-zinc-900/80 text-zinc-500">
+                    <tr className="bg-zinc-900/80 text-zinc-400">
                       <th className="text-right font-medium px-3 py-2">الاستراتيجية</th>
                       <th className="text-center font-medium px-2 py-2">إصابة</th>
                       <th className="text-center font-medium px-2 py-2">عينات</th>
@@ -685,12 +685,12 @@ export function TrainerPanel({
                       <tr key={s.key} className="border-t border-zinc-800/60 hover:bg-zinc-900/40">
                         <td className="px-3 py-2 text-zinc-300">
                           <div className="font-medium">{s.nameAr}</div>
-                          <div className="text-[9px] text-zinc-600">{s.pillarAr} · مضاعف عام {s.global}</div>
+                          <div className="text-[9px] text-zinc-300">{s.pillarAr} · مضاعف عام {s.global}</div>
                         </td>
                         <td className={cn("px-2 py-2 text-center font-bold tabular-nums", s.winRate >= 55 ? "text-emerald-400" : s.winRate >= 45 ? "text-zinc-300" : "text-rose-400")} dir="ltr">
                           {s.winRate}%
                         </td>
-                        <td className="px-2 py-2 text-center text-zinc-500 tabular-nums" dir="ltr">{s.samples}</td>
+                        <td className="px-2 py-2 text-center text-zinc-400 tabular-nums" dir="ltr">{s.samples}</td>
                         <td className="px-2 py-2 text-center">
                           <MultCell v={s.trendUp} />
                         </td>
@@ -705,7 +705,7 @@ export function TrainerPanel({
                   </tbody>
                 </table>
               </div>
-              <p className="text-[9px] text-zinc-600 mt-1.5">
+              <p className="text-[9px] text-zinc-300 mt-1.5">
                 المضاعف فوق 1.0 = البوت زاد الثقة في هذه الاستراتيجية ضمن هذا النظام السوقي بعد إثبات أدائها · أقل من 1.0 = خُفضت بعد تكرار الأخطاء
               </p>
             </div>
@@ -734,7 +734,7 @@ export function TrainerPanel({
                     {l.severity === "info" && <ShieldCheck className="w-4 h-4 text-zinc-400 shrink-0 mt-0.5" />}
                     <div>
                       <p className="text-[12px] leading-relaxed text-zinc-300">{l.text}</p>
-                      {l.count > 0 && <span className="text-[9px] text-zinc-600" dir="ltr">n={l.count}</span>}
+                      {l.count > 0 && <span className="text-[9px] text-zinc-300" dir="ltr">n={l.count}</span>}
                     </div>
                   </div>
                 ))}
@@ -760,15 +760,15 @@ export function TrainerPanel({
                         {m.changePct >= 0 ? "+" : ""}{m.changePct}%
                       </span>
                     </div>
-                    <div className="text-[10px] text-zinc-600 mt-1.5 tabular-nums" dir="ltr">
+                    <div className="text-[10px] text-zinc-300 mt-1.5 tabular-nums" dir="ltr">
                       {m.open} ← {m.close} · H {m.high} · L {m.low}
                     </div>
                     <div className="flex items-center justify-between mt-2">
-                      <span className="text-[10px] text-zinc-500" dir="ltr">{m.trades} صفقة</span>
+                      <span className="text-[10px] text-zinc-300" dir="ltr">{m.trades} صفقة</span>
                       <span className={cn("text-[10px] font-bold tabular-nums", m.wr >= 55 ? "text-emerald-400" : m.wr >= 45 ? "text-zinc-400" : "text-rose-400")} dir="ltr">
                         فوز {m.wr}%
                       </span>
-                      <Badge variant="outline" className={cn("text-[8px] px-1 py-0", m.dominant === "BUY" ? "border-emerald-500/30 text-emerald-400" : m.dominant === "SELL" ? "border-rose-500/30 text-rose-400" : "border-zinc-700 text-zinc-500")}>
+                      <Badge variant="outline" className={cn("text-[8px] px-1 py-0", m.dominant === "BUY" ? "border-emerald-500/30 text-emerald-400" : m.dominant === "SELL" ? "border-rose-500/30 text-rose-400" : "border-zinc-700 text-zinc-400")}>
                         {m.dominant === "BUY" ? "شراء" : m.dominant === "SELL" ? "بيع" : "متوازن"}
                       </Badge>
                     </div>
@@ -779,11 +779,11 @@ export function TrainerPanel({
 
             {/* --- ملاحظات الأمانة --- */}
             <div className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-3.5">
-              <div className="flex items-center gap-1.5 text-[10px] text-zinc-500 mb-1.5">
+              <div className="flex items-center gap-1.5 text-[10px] text-zinc-300 mb-1.5">
                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-500/70" />
                 ضمانات نزاهة التدريب
               </div>
-              <ul className="text-[10px] text-zinc-600 leading-relaxed list-disc pr-4 flex flex-col gap-1">
+              <ul className="text-[10px] text-zinc-300 leading-relaxed list-disc pr-4 flex flex-col gap-1">
                 <li>كل تنبؤ في الخط الزمني استُخرج من بيانات الشموع السابقة فقط — المؤشرات كلها سببية (لا تعتمد على أي بيانات لاحقة).</li>
                 <li>الدخول على افتتاح الشمعة التالية، والتحقق لاحقاً (وقف/هدف بأولوية الوقف داخل الشمعة — افتراض متحفظ).</li>
                 <li>حلقات التعلم تعمل على أول 75% فقط؛ آخر 25% (الاختبار الأعمى) لم تتسرب إليها الأوزان إطلاقاً.</li>

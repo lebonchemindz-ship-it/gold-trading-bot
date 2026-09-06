@@ -83,7 +83,7 @@ export function TFTable({ signal }: { signal: SignalResponse }) {
             </TableBody>
           </Table>
         </div>
-        <p className="text-[11px] text-zinc-500 px-4 py-3 border-t border-zinc-800/60 leading-relaxed">
+        <p className="text-[11px] text-zinc-300 px-4 py-3 border-t border-zinc-800/60 leading-relaxed">
           الحكم يُشتق من 6 مؤشرات لكل إطار (EMA50/200، السعر مقابل EMA، RSI، MACD، Stochastic). التزامن عبر 4 أطر
           أو أكثر = إشارة قوية — هذا جوهر منهجية Confluence.
         </p>

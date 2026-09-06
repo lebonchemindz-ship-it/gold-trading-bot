@@ -233,7 +233,7 @@ export function MarketClock() {
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" aria-hidden />
               )}
             </div>
-            <div className="text-[11px] text-zinc-500 flex items-center gap-1.5 flex-wrap">
+            <div className="text-[11px] text-zinc-300 flex items-center gap-1.5 flex-wrap">
               <span>{status.sub}</span>
               <span className="text-amber-300 font-bold tabular-nums" dir="ltr">
                 {fmtCountdown(status.countdown)}
@@ -242,17 +242,17 @@ export function MarketClock() {
           </div>
         </div>
 
-        <div className="flex items-center gap-4 mr-auto text-[11px] text-zinc-400">
+        <div className="flex items-center gap-4 mr-auto text-[11px] text-zinc-300">
           <span className="flex items-center gap-1.5">
-            <Globe2 className="w-3.5 h-3.5 text-zinc-600" />
-            <span className="text-zinc-600">توقيت غرينتش</span>
+            <Globe2 className="w-3.5 h-3.5 text-zinc-400" />
+            <span className="text-zinc-400">توقيت غرينتش</span>
             <span className="tabular-nums font-bold text-zinc-300" dir="ltr">
               {utcTime}
             </span>
           </span>
           <span className="flex items-center gap-1.5">
-            <Clock className="w-3.5 h-3.5 text-zinc-600" />
-            <span className="text-zinc-600">نيويورك</span>
+            <Clock className="w-3.5 h-3.5 text-zinc-400" />
+            <span className="text-zinc-400">نيويورك</span>
             <span className="tabular-nums font-bold text-zinc-300" dir="ltr">
               {String(ny.h).padStart(2, "0")}:{String(ny.m).padStart(2, "0")}
             </span>
@@ -285,13 +285,13 @@ export function MarketClock() {
                     "text-[9px] font-bold px-1.5 py-0.5 rounded-full border tabular-nums",
                     activeSession
                       ? "text-emerald-400 border-emerald-500/40 bg-emerald-500/10"
-                      : "text-zinc-500 border-zinc-700"
+                      : "text-zinc-400 border-zinc-700"
                   )}
                 >
                   {activeSession ? "نشطة" : `يفتح خلال ${minsToOpen != null && minsToOpen > 2880 ? `${Math.floor(minsToOpen / 1440)}ي` : `${minsToOpen ?? "?"}د`}`}
                 </span>
               </div>
-              <div className="text-[10px] text-zinc-600 mb-2">
+              <div className="text-[10px] text-zinc-300 mb-2">
                 {s.desc} · {String(s.open).padStart(2, "0")}:00-{String(s.close).padStart(2, "0")}:00 محلي
               </div>
               {/* شريط التقدم */}
@@ -304,7 +304,7 @@ export function MarketClock() {
                   style={{ width: `${activeSession ? Math.min(progress, 100) : 0}%` }}
                 />
               </div>
-              <div className="mt-1.5 text-[10px] text-zinc-500 tabular-nums" dir="ltr">
+              <div className="mt-1.5 text-[10px] text-zinc-300 tabular-nums" dir="ltr">
                 {String(lp.h).padStart(2, "0")}:{String(lp.m).padStart(2, "0")} محلي
               </div>
             </div>
@@ -334,14 +334,14 @@ export function MarketClock() {
                 <div className={cn("text-[10px] font-bold", isToday ? "text-amber-300" : "text-zinc-400")}>
                   {d.ar}
                 </div>
-                <div className="text-[8px] text-zinc-600 mt-0.5">
+                <div className="text-[8px] text-zinc-400 mt-0.5">
                   {d.en === "Sat" ? "مغلق" : d.en === "Sun" ? "17:00+" : d.en === "Fri" ? "حتى 17:00" : "24 ساعة"}
                 </div>
               </div>
             );
           })}
         </div>
-        <div className="mt-2 text-[10px] text-zinc-600 leading-relaxed">
+        <div className="mt-2 text-[10px] text-zinc-300 leading-relaxed">
           أيام تداول الذهب: من مساء الأحد حتى مساء الجمعة (بتوقيت نيويورك) مع استراحة صيانة يومية من 17:00 إلى
           18:00 — التوقيت أعلاه محسوب بدقة التوقيت الصيفي/الشتوي تلقائياً.
         </div>

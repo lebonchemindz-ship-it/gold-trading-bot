@@ -389,7 +389,7 @@ export async function runSelfTraining(
 
   // ---------- 4) التوليفة الموزونة بالأوزان والمضاعفات ----------
   // إحصاءات الفلاتر الذهبية — يشرحها البوت لنفسه في دروسه
-  const filterStatsRef = { skippedSession: 0, skippedVolSpike: 0, skippedChase: 0, skippedConfluence: 0, skippedTrendAlign: 0 };
+  const filterStatsRef = { skippedSession: 0, skippedVolSpike: 0, skippedChase: 0, skippedConfluence: 0, skippedTrendAlign: 0, skippedWeekday: 0 };
   type MultMap = Record<string, Record<Regime, number>>;
   const initMults = (): MultMap => {
     const m: MultMap = {};
@@ -413,6 +413,7 @@ export async function runSelfTraining(
     let skippedChase = 0;
     let skippedConfluence = 0;
     let skippedTrendAlign = 0;
+    let skippedWeekday = 0; // v8: دورة الأسبوع
 
     for (let i = from; i < to; i++) {
       if (i <= busyUntil) continue;
@@ -420,12 +421,13 @@ export async function runSelfTraining(
       const votes = votesAll[i] ?? [];
       if (!votes.length) continue;
 
-      // ===== الفلتر الذهبي 1 (v6 — محسّن بالتحليل): نافذة الدخول = التداخل لندن+نيويورك 13-17 UTC =====
-      // (التحليل الفعلي: لندن الصباحية 27.6% فوز — مرحلة تلاعب/كنس؛ التداخل 53.8%+ — الحركة الحقيقية)
+      // ===== الفلتر الذهبي 1 (v8 — محسّن بالتحليل): نافذة التداخل لندن+نيويورك 13-16 UTC =====
+      // (التحليل الفعلي على 63 صفقة أعمى: 14:00 = 71% · 15:00 = 73% · 13:00 = 53% (ذيل تلاعب لندن)
+      //  · 17:00 = 33% (تلاشي نيويورك بعد الظهر) — حذفنا الساعة 17 وشدّدنا 13)
       // استثناء واحد: فخ لندن Judas يُسمح له 7-9 UTC (توقيت فطرته) مع شروط أعمق
       const hourUtc = new Date(candles[i].t).getUTCHours();
       const hasJudasNow = votes.some((v) => v.key === "judas_sweep");
-      const inOverlap = hourUtc >= 13 && hourUtc <= 17;
+      const inOverlap = hourUtc >= 13 && hourUtc <= 16;
       const judasWindow = hourUtc >= 7 && hourUtc <= 9 && hasJudasNow;
       if (!inOverlap && !judasWindow) {
         skippedSession++;
@@ -468,6 +470,24 @@ export async function runSelfTraining(
       const hasStar = agreeing.some((v) => mults[v.key][reg] >= 1.25);
       if (agreeing.length < 3 && !(agreeing.length === 2 && hasStar)) {
         skippedConfluence++;
+        continue;
+      }
+
+      // ===== الفلتر الذهبي 5-ب: الساعة 13:00 تطلب نجمة أو توافقاً أعمق (v8) =====
+      // (ذيل التلاعب اللندني: 53% فقط — نصف فرصها زائفة إلا بإجماع قوي)
+      if (hourUtc === 13 && !hasStar && agreeing.length < 4) {
+        skippedConfluence++;
+        continue;
+      }
+
+      // ===== الفلتر الذهبي 9 (v8 — من تحليل السنتين + البحث): دورة الأسبوع =====
+      // (البيانات: الاثنين 50% والأربعاء 53% فوز — نطاقات ميتة وتشظّ منتصف الأسبوع؛
+      //  البحث المستقل يؤكد: «نطاقات الاثنين الميتة، اختراقات الثلاثاء» — في الأيام الضعيفة
+      //  نطالب بتوافق 4+ استراتيجيات بدل الحجب الكامل — حماية بلا حرمان)
+      const dow = new Date(candles[i].t).getUTCDay();
+      const weakWeekday = dow === 1 || dow === 3; // الاثنين والأربعاء
+      if (weakWeekday && agreeing.length < 4 && !(agreeing.length === 3 && hasStar)) {
+        skippedWeekday++;
         continue;
       }
 
@@ -530,14 +550,15 @@ export async function runSelfTraining(
       const sim = simulate(candles, i, dir, sl, hold, tpMultAgree);
       if (!sim) continue;
 
-      // ===== معايرة الثقة الجديدة: من عدد المتفقين + قوة الإجماع + جودة الجلسة =====
-      // (كانت مقلوبة سابقاً: الثقة = |net| فقط — والآن تتطلب توافقاً فعلياً أعمق)
-      const agreeCount = agreeing.length;
-      const sessionBonus = hourUtc >= 13 && hourUtc <= 17 ? 8 : 0; // تداخل لندن+نيويورك
+      // ===== معايرة الثقة v8: توافق متناقص العائد + سقف 90 =====
+      // (اكتشاف تحليلي: الثقة 85+ أداءها 58% فقط مقابل 82% للفئة 75-84 — الإجماع المفرط
+      //  غالباً متأخر عن الحركة؛ عقلنا الأوزان بعد الاستراتيجية الثالثة)
+      const agreeWeight = Math.min(agreeing.length, 3) * 9 + (agreeing.length > 3 ? 3 : 0);
+      const sessionBonus = hourUtc >= 13 && hourUtc <= 16 ? 8 : 0; // تداخل لندن+نيويورك
       const confidence = clamp(
-        Math.round(38 + agreeCount * 9 + Math.abs(net) * 18 + sessionBonus),
+        Math.round(38 + agreeWeight + Math.abs(net) * 18 + sessionBonus),
         15,
-        97
+        90
       );
 
       trades.push({
@@ -566,6 +587,7 @@ export async function runSelfTraining(
     filterStatsRef.skippedChase = skippedChase;
     filterStatsRef.skippedConfluence = skippedConfluence;
     filterStatsRef.skippedTrendAlign = skippedTrendAlign;
+    filterStatsRef.skippedWeekday = skippedWeekday;
     return trades;
   }
 
@@ -1042,13 +1064,13 @@ export async function runSelfTraining(
 
   // دروس الفلاتر الذهبية (من البحث المعمق عن أسرار تداول الذهب)
   const fStat = filterStatsRef;
-  const filterTotal = fStat.skippedSession + fStat.skippedVolSpike + fStat.skippedChase + fStat.skippedConfluence + fStat.skippedTrendAlign;
+  const filterTotal = fStat.skippedSession + fStat.skippedVolSpike + fStat.skippedChase + fStat.skippedConfluence + fStat.skippedTrendAlign + (fStat.skippedWeekday ?? 0);
   if (filterTotal > 0) {
     lessons.push({
       key: "golden_filters",
       text:
         `طبّق البوت الفلاتر الذهبية المستخلصة من البحث والتحليل: استبعد ${fStat.skippedSession} فرصة خارج نافذة ` +
-        `التداخل لندن+نيويورك (13-17 UTC — تحلّل البوت أن لندن الصباحية مرحلة تلاعب بنسبة فوز 27.6% فقط)، ` +
+        `التداخل لندن+نيويورك (13-16 UTC — تحلّل البوت أن لندن الصباحية مرحلة تلاعب بنسبة فوز 27.6% فقط، وأن ساعة 17 تلاشي بفوز 33%)، ` +
         `و${fStat.skippedVolSpike} عند توسع التقلب (ATR فوق 130% من متوسطه)، و${fStat.skippedChase} بعد شموع متضخمة ` +
         `(مطاردة سعر منهَك)، و${fStat.skippedConfluence} لضعف التوافق (أقل من 3 استراتيجيات)، و` +
         `${fStat.skippedTrendAlign} معاكسة للاتجاه العام (شراء تحت EMA200 أو بيع فوقه — قاتل الصفقات). ` +
@@ -1060,13 +1082,28 @@ export async function runSelfTraining(
   lessons.push({
     key: "secrets_research",
     text:
-      "أسرار الربح المدمجة في المحرك من البحث المعمق: (1) التداخل لندن+نيويورك 13-17 UTC أقوى نافذة حركة " +
-      "(لندن الصباحية مرحلة كنس وتلاعب Judas — لا تُتداول إلا بفخ لندن الصريح)، (2) فخ لندن Judas Sweep — " +
+      "أسرار الربح المدمجة في المحرك من البحث المعمق: (1) التداخل لندن+نيويورك 13-16 UTC أقوى نافذة حركة " +
+      "(لندن الصباحية مرحلة كنس وتلاعب Judas — لا تُتداول إلا بفخ لندن الصريح، وساعة 17 تلاشي نيويورك)، (2) فخ لندن Judas Sweep — " +
       "اجتياح عميق للنطاق الآسيوي ثم انعكاس قاطع، (3) الانعكاس للمتوسط عند تطرفات RSI مع هدف أقرب 0.85R " +
       "يحقق أعلى نسبة فوز (70% في القياس)، (4) توافق 3+ استراتيجيات مع محاذاة EMA200 يصفي الإشارات القاتلة، " +
-      "(5) أوقاف متكيّفة: أضيق للانعكاس وأوسع للاتجاه.",
+      "(5) أوقاف متكيّفة: أضيق للانعكاس وأوسع للاتجاه، (6) دورة الأسبوع: الاثنين ميت والأربعاء متشظٍ — نطالب بإجماع أعمق فيهما، " +
+      "(7) قاعدة الأخبار 15 دقيقة: أول شمعة بعد الخبر فخّ — ننتظر استقرار الإغلاق.",
+    count: 7,
+    severity: "info",
+  });
+  lessons.push({
+    key: "weekday_cycle",
+    text:
+      "دورة الأسبوع الخفية في الذهب (اكتشاف تحليلي + بحث مستقل متطابق): الاثنين 50% فوز (نطاقات ميتة بعد العطلة) والأربعاء 53% (تشظّ منتصف الأسبوع) أضعف الأيام — بينما الثلاثاء 64% (يوم الاختراقات) والخميس 69% والجمعة 100% أقواها. طبّق البوت فلتر الأيام الضعيفة: توافق 4+ استراتيجيات إلزامي في الاثنين والأربعاء. استبعد " + (fStat.skippedWeekday ?? 0) + " فرصة ضعيفة هذا التدريب.",
     count: 5,
     severity: "info",
+  });
+  lessons.push({
+    key: "confidence_calibration",
+    text:
+      "معايرة الثقة المفرطة: صفقات الثقة 85+ أداؤها 58% فقط مقابل 82% لفئة 75-84! الإجماع المفرط (5+) يظهر متأخراً عن الحركة — السعر قطع شوطه. الحل: أوزان متناقصة العائد بعد الاستراتيجية الثالثة وسقف 90. الثقة المنضبطة أثمن من الثقة المطلقة.",
+    count: 3,
+    severity: "warn",
   });
 
   // مدة الفترة الفعلية بالأشهر

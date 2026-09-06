@@ -86,14 +86,14 @@ export function RiskCalculator({ entry, sl }: { entry: number | null; sl: number
             <StatBox label="مبلغ المخاطرة" value={`${result.riskAmount}$`} unit={`(${riskPct}%)`} />
             <StatBox label="مسافة الوقف" value={`${result.riskUsd}$`} unit={`≈ ${result.pips} نقطة`} />
             <StatBox label="أونصات" value={String(result.ounces)} unit="oz" />
-            <div className="col-span-2 text-[11px] text-zinc-500 leading-relaxed bg-zinc-900/70 rounded-lg border border-zinc-800 px-3 py-2">
+            <div className="col-span-2 text-[11px] text-zinc-300 leading-relaxed bg-zinc-900/70 rounded-lg border border-zinc-800 px-3 py-2">
               المعادلة: اللوت = (الحساب × نسبة المخاطرة) ÷ (مسافة الوقف بالدولار × 100$). خسارة اللوت الواحد إذا
               ضُرب الوقف = <span dir="ltr">{result.lossPerLot}$</span>. لا تتجاوز 2% لكل صفقة أبداً — قاعدة
               المحترفين في سوق يتحرك 30-60$ يومياً.
             </div>
           </div>
         ) : (
-          <p className="text-xs text-zinc-500 leading-relaxed bg-zinc-900/70 rounded-lg border border-zinc-800 px-3 py-2.5">
+          <p className="text-xs text-zinc-400 leading-relaxed bg-zinc-900/70 rounded-lg border border-zinc-800 px-3 py-2.5">
             أدخل حجم الحساب ونسبة المخاطرة. تُستخدم مسافة الوقف من توصية البوت الحالية
             {entry && sl ? (
               <>
@@ -128,9 +128,9 @@ function StatBox({
         highlight ? "border-amber-500/40 bg-amber-500/5" : "border-zinc-800 bg-zinc-900/60"
       }`}
     >
-      <div className="text-[10px] text-zinc-500">{label}</div>
+      <div className="text-[10px] text-zinc-300">{label}</div>
       <div className={`text-lg font-bold tabular-nums ${highlight ? "text-amber-300" : "text-zinc-200"}`} dir="ltr">
-        {value} <span className="text-[10px] font-normal text-zinc-500">{unit}</span>
+        {value} <span className="text-[10px] font-normal text-zinc-400">{unit}</span>
       </div>
     </div>
   );

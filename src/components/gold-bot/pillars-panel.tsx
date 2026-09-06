@@ -95,11 +95,11 @@ export function PillarsPanel({ pillars }: { pillars: PillarScore[] }) {
                     }
                   />
                 </div>
-                <span className="text-[11px] text-zinc-500 mt-1 block">
+                <span className="text-[11px] text-zinc-300 mt-1 block">
                   {scoreText(p.score)} — {Math.abs(p.score)}% قوة الإشارة
                 </span>
               </div>
-              <div className="shrink-0 text-zinc-500">
+              <div className="shrink-0 text-zinc-400">
                 {isOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
               </div>
             </button>
@@ -110,7 +110,7 @@ export function PillarsPanel({ pillars }: { pillars: PillarScore[] }) {
                   {p.reasons.map((r, i) => (
                     <li key={i} className="flex items-start justify-between gap-3 text-xs leading-relaxed">
                       <span className="text-zinc-300 flex-1">
-                        <span className="text-zinc-500 ml-1">•</span>
+                        <span className="text-zinc-400 ml-1">•</span>
                         {r.text}
                       </span>
                       {r.contribution !== 0 && (

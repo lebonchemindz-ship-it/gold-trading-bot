@@ -386,6 +386,36 @@ function pillarSession(ctx: PillarScore_ctxAlias): PillarScore {
     contribution: 0,
   });
 
+  // 1-ب) دورة الأسبوع الخفية في الذهب (v8 — من تدريب السنتين + البحث المستقل)
+  // الاثنين والأربعاء أضعف الأيام فوزاً — نضيف إنذاراً صريحاً ونخصم الثقة
+  const now = new Date();
+  const dow = now.getUTCDay();
+  const WD_AR = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
+  if (dow === 1 || dow === 3) {
+    const weakTxt =
+      dow === 1
+        ? "الاثنين — نطاقات ميتة بعد عطلة الأسبوع (فوز البوت التاريخي 50%): انتظر اختراقاً صريحاً أو اكتفِ بالمراقبة"
+        : "الأربعاء — تشظّ منتصف الأسبوع (فوز البوت التاريخي 53%): طالب توافقاً أعمق قبل الدخول";
+    reasons.push({
+      text: `⚠️ دورة الأسبوع: ${weakTxt}`,
+      contribution: -12,
+    });
+  } else if (dow === 2 || dow === 4 || dow === 5) {
+    reasons.push({
+      text: `✓ دورة الأسبوع: ${WD_AR[dow]} من أيام الذهب القوية (الثلاثاء اختراقات · الخميس/الجمعة اتجاه مؤكد — فوز تاريخي 64-100%)`,
+      contribution: 8,
+    });
+  }
+
+  // 1-ج) ساعة 17:00 UTC تلاشي نيويورك (فوز تاريخي 33%) — إنذار خفيف
+  const hUtc = now.getUTCHours();
+  if (hUtc === 17) {
+    reasons.push({
+      text: "⚠️ الساعة 17:00 UTC — تلاشي ما بعد ظهور نيويورك (أضعف ساعة تاريخياً بفوز 33%): حجم أصغر أو انتظر الغد",
+      contribution: -8,
+    });
+  }
+
   // 2) اتجاه حركة الجلسة الحالية (الافتتاح → الآن)
   const dayStart = Math.floor(entry.candles[entry.candles.length - 1].t / 86400000) * 86400000;
   const todays = entry.candles.filter((c) => c.t >= dayStart);

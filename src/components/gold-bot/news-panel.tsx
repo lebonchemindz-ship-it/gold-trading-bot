@@ -79,7 +79,7 @@ function EventRow({ ev }: { ev: CalendarEventUI }) {
           <span className="text-xs text-zinc-200 block truncate" dir="auto">
             {ev.title}
           </span>
-          <span className="text-[10px] text-zinc-600">
+          <span className="text-[10px] text-zinc-300">
             {ev.forecast ? `توقع: ${ev.forecast}` : "بلا توقع"}
             {ev.previous ? ` · سابق: ${ev.previous}` : ""}
           </span>
@@ -140,13 +140,13 @@ export function NewsPanel({ data }: { data: NewsData }) {
               ))}
             </ul>
           ) : (
-            <p className="text-[11px] text-zinc-600 bg-zinc-900/40 border border-zinc-800 rounded-lg px-3 py-3">
+            <p className="text-[11px] text-zinc-300 bg-zinc-900/40 border border-zinc-800 rounded-lg px-3 py-3">
               لا أحداث اقتصادية أمريكية متبقية اليوم — السوق يحركه العامل الفني وعناوين الأخبار.
             </p>
           )}
           {today.past.length > 0 && (
             <details className="mt-2 group">
-              <summary className="text-[10px] text-zinc-500 cursor-pointer flex items-center gap-1.5 select-none">
+              <summary className="text-[10px] text-zinc-300 cursor-pointer flex items-center gap-1.5 select-none">
                 <History className="w-3 h-3" />
                 أحداث اليوم المنقضية ({today.past.length})
               </summary>
@@ -160,7 +160,7 @@ export function NewsPanel({ data }: { data: NewsData }) {
 
           {weekHigh.length > 0 && (
             <details className="mt-2">
-              <summary className="text-[10px] text-zinc-500 cursor-pointer select-none flex items-center gap-1.5">
+              <summary className="text-[10px] text-zinc-300 cursor-pointer select-none flex items-center gap-1.5">
                 <Clock3 className="w-3 h-3" />
                 أهم أحداث بقية الأسبوع ({weekHigh.length})
               </summary>
@@ -173,7 +173,7 @@ export function NewsPanel({ data }: { data: NewsData }) {
                     <span className="text-zinc-400 truncate" dir="auto">
                       {ev.title}
                     </span>
-                    <span className="text-[10px] text-zinc-600 tabular-nums shrink-0" dir="ltr">
+                    <span className="text-[10px] text-zinc-300 tabular-nums shrink-0" dir="ltr">
                       {new Date(ev.time).toLocaleDateString("ar-EG", { weekday: "short", day: "numeric" })}{" "}
                       {timeStr(ev.time)}
                     </span>
@@ -189,7 +189,7 @@ export function NewsPanel({ data }: { data: NewsData }) {
           <h3 className="text-[11px] font-bold text-zinc-400 mb-2 flex items-center gap-1.5">
             <Flame className="w-3.5 h-3.5 text-amber-400/80" />
             آخر عناوين الذهب والاقتصاد
-            <span className="text-[9px] text-zinc-600 font-normal">(بالإنجليزية من مصادر عالمية)</span>
+            <span className="text-[9px] text-zinc-300 font-normal">(بالإنجليزية من مصادر عالمية)</span>
           </h3>
           {headlines.length > 0 ? (
             <ul className="flex flex-col gap-1.5 max-h-[380px] overflow-y-auto pl-1">
@@ -208,7 +208,7 @@ export function NewsPanel({ data }: { data: NewsData }) {
                       <span className={cn("text-[11px] leading-relaxed", h.relevant ? "text-zinc-200" : "text-zinc-400")} dir="ltr">
                         {h.title}
                       </span>
-                      <ExternalLink className="w-3 h-3 text-zinc-600 shrink-0 mt-0.5" />
+                      <ExternalLink className="w-3 h-3 text-zinc-400 shrink-0 mt-0.5" />
                     </div>
                     <div className="flex items-center gap-2 mt-1">
                       <span className="text-[9px] text-amber-400/80 font-bold">{h.source}</span>
@@ -217,14 +217,14 @@ export function NewsPanel({ data }: { data: NewsData }) {
                           متصل بالذهب
                         </span>
                       )}
-                      <span className="text-[9px] text-zinc-600 mr-auto">{relTime(h.time)}</span>
+                      <span className="text-[9px] text-zinc-300 mr-auto">{relTime(h.time)}</span>
                     </div>
                   </a>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="text-[11px] text-zinc-600 bg-zinc-900/40 border border-zinc-800 rounded-lg px-3 py-3">
+            <p className="text-[11px] text-zinc-300 bg-zinc-900/40 border border-zinc-800 rounded-lg px-3 py-3">
               تعذر جلب العناوين حالياً من مصادر RSS — اضغط تحديث للمحاولة مجدداً.
             </p>
           )}
