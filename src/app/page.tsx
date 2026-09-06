@@ -42,7 +42,7 @@ export default function GoldBotPage() {
   const [countdown, setCountdown] = useState(REFRESH_INTERVAL);
   const [lastUpdate, setLastUpdate] = useState<string>("");
 
-  // حالة التدريب الذاتي العميق (6 أشهر)
+  // حالة التدريب الذاتي العميق
   const [trainData, setTrainData] = useState<SelfTrainingResult | null>(null);
   const [trainRunning, setTrainRunning] = useState(false);
   const [trainError, setTrainError] = useState<string | null>(null);
@@ -97,7 +97,7 @@ export default function GoldBotPage() {
     }
   }, []);
 
-  // ---------- تشغيل التدريب الذاتي العميق (6 أشهر — تنبأ أعمى ← تحقق ← تفسير ← عدّل) ----------
+  // ---------- تشغيل التدريب الذاتي العميق (سنة كاملة — تنبأ أعمى ← تحقق ← تفسير ← عدّل) ----------
   const runTraining = useCallback(
     async (epochs: number, silent = false) => {
       setTrainRunning(true);
@@ -490,7 +490,7 @@ export default function GoldBotPage() {
                     <TradingViewTechnicalGauge />
                   </div>
 
-                  {/* لوحة التدريب الذاتي العميق — 6 أشهر */}
+                  {/* لوحة التدريب الذاتي العميق */}
                   <div className="mt-5">
                     <TrainerPanel
                       result={trainData}

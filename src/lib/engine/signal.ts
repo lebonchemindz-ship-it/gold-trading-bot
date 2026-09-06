@@ -321,13 +321,17 @@ export async function generateSignal(
   const totalWeight = pillars.reduce((a, p) => a + p.weight, 0);
   const score = pillars.reduce((a, p) => a + p.score * p.weight, 0) / totalWeight;
 
-  // 9) الاتجاه والثقة
+  // 9) الاتجاه والثقة — عتبة أعلى 18 (كانت 15): إشارات أقل لكن أجود
+  // مبنية على البحث: التصفية المتشددة ترفع نسبة الفوز
   let direction: Direction = "WAIT";
-  if (score >= 15) direction = "BUY";
-  else if (score <= -15) direction = "SELL";
+  if (score >= 18) direction = "BUY";
+  else if (score <= -18) direction = "SELL";
 
   const actionable = direction !== "WAIT";
-  const rawConfidence = 50 + Math.abs(score) * 0.45 * gate.factor;
+  // الثقة تتضاعف بعمق التوافق: عدد الأعمدة القوية بنفس الاتجاه يرفعها
+  const strongAgree = pillars.filter((p) => Math.sign(p.score) === Math.sign(score) && Math.abs(p.score) >= 12).length;
+  const confluenceBoost = 1 + Math.max(0, strongAgree - 2) * 0.06;
+  const rawConfidence = 50 + Math.abs(score) * 0.45 * gate.factor * confluenceBoost;
   const confidence = Math.min(95, Math.round(rawConfidence));
 
   // 10) مستويات الصفقة

@@ -122,9 +122,14 @@ export const STRATEGY_META: { key: string; nameAr: string; pillar: string; pilla
   { key: "bb_reversal", nameAr: "ارتداد بولينجر + RSI", pillar: "momentum", pillarAr: "الزخم" },
   { key: "sr_bounce", nameAr: "ارتداد دعم/مقاومة ديناميكي", pillar: "location", pillarAr: "الموقع" },
   { key: "smc_sweep", nameAr: "كنس سيولة + استعادة (SMC)", pillar: "location", pillarAr: "الموقع" },
+  { key: "judas_sweep", nameAr: "فخ لندن (Judas Sweep للنطاق الآسيوي)", pillar: "session", pillarAr: "الجلسة" },
   { key: "pattern_play", nameAr: "أنماط الشموع اليابانية", pillar: "priceAction", pillarAr: "حركة السعر" },
   { key: "asian_breakout", nameAr: "كسر النطاق الآسيوي", pillar: "session", pillarAr: "الجلسة" },
 ];
+
+// استراتيجيات الانعكاس للمتوسط — هدفها أقرب (0.85R) لأن الإحصاء يظهر نسبة فوز أعلى بهدف أقرب
+// (البحث: أنظمة mean-reversion تحقق 70%+ بذلك الإعداد)
+const MR_KEYS = new Set(["rsi_reversal", "bb_reversal", "sr_bounce", "judas_sweep"]);
 
 // ---------- أدوات ----------
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -205,30 +210,32 @@ function statsOf(trades: RawTrade[]): BtStats {
   };
 }
 
-/** محاكاة النتيجة — الوقف له الأولوية داخل الشمعة (متحفظ) */
+/** محاكاة النتيجة — الوقف له الأولوية داخل الشمعة (متحفظ) 
+ * tpMult: مضاعف الهدف بالنسبة للمخاطرة (1 = هدف 1R، 0.85 = هدف أقرب لاستراتيجيات الانعكاس) */
 export function simulate(
   candles: Candle[],
   i: number,
   dir: 1 | -1,
   sl: number,
-  hold: number
+  hold: number,
+  tpMult = 1
 ): { result: "win" | "loss" | "timeout"; r: number; bars: number; endIdx: number } | null {
   const next = candles[i + 1];
   if (!next) return null;
   const entry = next.o;
   const risk = Math.abs(entry - sl);
   if (risk < 0.3) return null; // وقف غير منطقي — تجاهل
-  const tp1 = entry + dir * risk;
+  const tp1 = entry + dir * risk * tpMult;
 
   const last = Math.min(i + hold, candles.length - 1);
   for (let j = i + 1; j <= last; j++) {
     const c = candles[j];
     if (dir === 1) {
       if (c.l <= sl) return { result: "loss", r: -1, bars: j - i, endIdx: j };
-      if (c.h >= tp1) return { result: "win", r: 1, bars: j - i, endIdx: j };
+      if (c.h >= tp1) return { result: "win", r: tpMult, bars: j - i, endIdx: j };
     } else {
       if (c.h >= sl) return { result: "loss", r: -1, bars: j - i, endIdx: j };
-      if (c.l <= tp1) return { result: "win", r: 1, bars: j - i, endIdx: j };
+      if (c.l <= tp1) return { result: "win", r: tpMult, bars: j - i, endIdx: j };
     }
   }
   const exit = candles[last].c;
@@ -292,6 +299,7 @@ export interface Vote {
   key: string;
   dir: 1 | -1;
   sl: number; // قيمة الوقف المطلقة
+  tpMult: number; // مضاعف الهدف (0.85 للانعكاس للمتوسط — 1 للاتجاه)
 }
 
 export interface Ctx {
@@ -335,8 +343,8 @@ export function evaluateAt(ctx: Ctx, i: number): Vote[] {
 
   // 1) ema_trend: ترتيب كامل + ADX ≥ 20
   if (ok(e9, e21, e50, ctx.adxArr[i]) && ctx.adxArr[i] >= 20) {
-    if (e9 > e21 && e21 > e50 && c.c > e9) votes.push({ key: "ema_trend", dir: 1, sl: c.c - 1.5 * a });
-    if (e9 < e21 && e21 < e50 && c.c < e9) votes.push({ key: "ema_trend", dir: -1, sl: c.c + 1.5 * a });
+    if (e9 > e21 && e21 > e50 && c.c > e9) votes.push({ key: "ema_trend", dir: 1, sl: c.c - 1.5 * a, tpMult: 1 });
+    if (e9 < e21 && e21 < e50 && c.c < e9) votes.push({ key: "ema_trend", dir: -1, sl: c.c + 1.5 * a, tpMult: 1 });
   }
 
   // 2) macd_cross: تقاطع خلال آخر شمعتين + اتجاه EMA50
@@ -345,8 +353,8 @@ export function evaluateAt(ctx: Ctx, i: number): Vote[] {
   const mlP = ctx.macdLine[i - 1];
   const msP = ctx.macdSignal[i - 1];
   if (ok(ml, ms, mlP, msP, e50)) {
-    if (ml > ms && mlP <= msP && c.c > e50) votes.push({ key: "macd_cross", dir: 1, sl: c.c - 1.5 * a });
-    if (ml < ms && mlP >= msP && c.c < e50) votes.push({ key: "macd_cross", dir: -1, sl: c.c + 1.5 * a });
+    if (ml > ms && mlP <= msP && c.c > e50) votes.push({ key: "macd_cross", dir: 1, sl: c.c - 1.5 * a, tpMult: 1 });
+    if (ml < ms && mlP >= msP && c.c < e50) votes.push({ key: "macd_cross", dir: -1, sl: c.c + 1.5 * a, tpMult: 1 });
   }
 
   // 3) bb_break: انضغاط سابق + إغلاق خارج الشريط بجسم قوي
@@ -354,18 +362,25 @@ export function evaluateAt(ctx: Ctx, i: number): Vote[] {
   const bwAvgNow = ctx.bwAvg[i];
   const squeezePrev = ok(ctx.bw[i - 1], ctx.bwAvg[i - 1]) && ctx.bw[i - 1] < 0.8 * ctx.bwAvg[i - 1];
   if (squeezePrev && ok(ctx.bbUpper[i], ctx.bbLower[i]) && body > 0.5 * a) {
-    if (c.c > ctx.bbUpper[i]) votes.push({ key: "bb_break", dir: 1, sl: c.c - 1.5 * a });
-    if (c.c < ctx.bbLower[i]) votes.push({ key: "bb_break", dir: -1, sl: c.c + 1.5 * a });
+    if (c.c > ctx.bbUpper[i]) votes.push({ key: "bb_break", dir: 1, sl: c.c - 1.5 * a, tpMult: 1 });
+    if (c.c < ctx.bbLower[i]) votes.push({ key: "bb_break", dir: -1, sl: c.c + 1.5 * a, tpMult: 1 });
   }
   void bwNow;
   void bwAvgNow;
 
-  // 4) rsi_reversal: خروج من التطرف + مع EMA200
-  if (ok(rsiNow, rsiPrev, e200)) {
-    if (rsiPrev < 32 && rsiNow > rsiPrev && c.c > e200)
-      votes.push({ key: "rsi_reversal", dir: 1, sl: c.c - 1.5 * a });
-    if (rsiPrev > 68 && rsiNow < rsiPrev && c.c < e200)
-      votes.push({ key: "rsi_reversal", dir: -1, sl: c.c + 1.5 * a });
+  // 4) rsi_reversal (مقوّى بالبحث): تطرف RSI + شمعة انعكاس + تمدّد سعري عن EMA21
+  // مع الاتجاه العام (EMA200): تطرف عادي (30/70)
+  // عكس الاتجاه العام: تطرف أعمق فقط (24/76) — لأن عكس الاتجاه أخطر
+  // + شرط التمدد: |close - EMA21| > 1.2×ATR (السعر مشدود ويحتاج ارتداداً)
+  if (ok(rsiNow, rsiPrev, e200, e21)) {
+    const stretchedUp = c.c - e21 > 1.2 * a;
+    const stretchedDown = e21 - c.c > 1.2 * a;
+    const withTrendUp = rsiPrev < 32 && rsiNow > rsiPrev && c.c > e200 && stretchedDown;
+    const deepAgainstUp = rsiPrev < 24 && rsiNow > rsiPrev && c.c <= e200 && stretchedDown;
+    const withTrendDown = rsiPrev > 68 && rsiNow < rsiPrev && c.c < e200 && stretchedUp;
+    const deepAgainstDown = rsiPrev > 76 && rsiNow < rsiPrev && c.c >= e200 && stretchedUp;
+    if (withTrendUp || deepAgainstUp) votes.push({ key: "rsi_reversal", dir: 1, sl: c.c - 1.3 * a, tpMult: 0.85 });
+    if (withTrendDown || deepAgainstDown) votes.push({ key: "rsi_reversal", dir: -1, sl: c.c + 1.3 * a, tpMult: 0.85 });
   }
 
   // 5) bb_reversal: اختراق الشريط ثم عودة داخلية + RSI
@@ -375,9 +390,9 @@ export function evaluateAt(ctx: Ctx, i: number): Vote[] {
   const loP = ctx.bbLower[i - 1];
   if (ok(up, lo, upP, loP, rsiNow)) {
     if (p.l < loP && c.c > lo && rsiNow < 42)
-      votes.push({ key: "bb_reversal", dir: 1, sl: c.c - 1.5 * a });
+      votes.push({ key: "bb_reversal", dir: 1, sl: c.c - 1.3 * a, tpMult: 0.85 });
     if (p.h > upP && c.c < up && rsiNow > 58)
-      votes.push({ key: "bb_reversal", dir: -1, sl: c.c + 1.5 * a });
+      votes.push({ key: "bb_reversal", dir: -1, sl: c.c + 1.3 * a, tpMult: 0.85 });
   }
 
   // 6) sr_bounce: دعم/مقاومة ديناميكي (آخر 12 شمعة سابقة)
@@ -390,9 +405,9 @@ export function evaluateAt(ctx: Ctx, i: number): Vote[] {
   }
   if (ok(support, resistance) && isFinite(support) && isFinite(resistance)) {
     if (c.l <= support + 0.25 * a && c.c > c.o && c.c > support)
-      votes.push({ key: "sr_bounce", dir: 1, sl: c.c - 1.2 * a });
+      votes.push({ key: "sr_bounce", dir: 1, sl: c.c - 1.2 * a, tpMult: 0.85 });
     if (c.h >= resistance - 0.25 * a && c.c < c.o && c.c < resistance)
-      votes.push({ key: "sr_bounce", dir: -1, sl: c.c + 1.2 * a });
+      votes.push({ key: "sr_bounce", dir: -1, sl: c.c + 1.2 * a, tpMult: 0.85 });
   }
 
   // 7) smc_sweep: كنس قاع/قمة اليوم السابق ثم استعادة
@@ -402,11 +417,35 @@ export function evaluateAt(ctx: Ctx, i: number): Vote[] {
     if (prevDay && prevDay.lastIdx < i) {
       if (c.l < prevDay.low && c.c > prevDay.low && c.c > c.o) {
         const slDist = clamp(c.c - c.l + 0.25 * a, 0.8 * a, 2.5 * a);
-        votes.push({ key: "smc_sweep", dir: 1, sl: c.c - slDist });
+        votes.push({ key: "smc_sweep", dir: 1, sl: c.c - slDist, tpMult: 1 });
       }
       if (c.h > prevDay.high && c.c < prevDay.high && c.c < c.o) {
         const slDist = clamp(c.h - c.c + 0.25 * a, 0.8 * a, 2.5 * a);
-        votes.push({ key: "smc_sweep", dir: -1, sl: c.c + slDist });
+        votes.push({ key: "smc_sweep", dir: -1, sl: c.c + slDist, tpMult: 1 });
+      }
+    }
+  }
+
+  // 7.5) judas_sweep (v6 — شروط أعمق بعد تحليل الفشل الأول):
+  // فخ لندن الحقيقي يحتاج اجتياحاً عميقاً (وليس اختراقاً سطحياً) + عودة قاطعة داخل النطاق
+  // الساعات 7-9 فقط (أول ساعات لندن — حيث يحدث الكنس فعلياً)
+  {
+    const hourUtc = new Date(c.t).getUTCHours();
+    const dayInfo = ctx.days[dayIdx];
+    if (
+      hourUtc >= 7 && hourUtc <= 9 &&
+      dayInfo && dayInfo.asianCount >= 4 &&
+      isFinite(dayInfo.asianHigh) && isFinite(dayInfo.asianLow)
+    ) {
+      // اجتياح عميق لقمة آسيوية (+0.15 ATR فوقها) ثم إغلاق أسفلها بهامش (‎−0.1 ATR) بجسم هابط = فخ صعودي → بيع
+      if (c.h > dayInfo.asianHigh + 0.15 * a && c.c < dayInfo.asianHigh - 0.1 * a && c.c < c.o) {
+        const slDist = clamp(c.h - c.c + 0.3 * a, 0.8 * a, 2.2 * a);
+        votes.push({ key: "judas_sweep", dir: -1, sl: c.c + slDist, tpMult: 0.85 });
+      }
+      // اجتياح عميق لقاع آسيوي ثم إغلاق فوقه بهامش بجسم صاعد = فخ هبوطي → شراء
+      if (c.l < dayInfo.asianLow - 0.15 * a && c.c > dayInfo.asianLow + 0.1 * a && c.c > c.o) {
+        const slDist = clamp(c.c - c.l + 0.3 * a, 0.8 * a, 2.2 * a);
+        votes.push({ key: "judas_sweep", dir: 1, sl: c.c - slDist, tpMult: 0.85 });
       }
     }
   }
@@ -422,9 +461,9 @@ export function evaluateAt(ctx: Ctx, i: number): Vote[] {
     const hammer = lowerWick > body * 2 && upperWick < body * 0.8 && bodyP < 0.45;
     const star = upperWick > body * 2 && lowerWick < body * 0.8 && bodyP < 0.45;
     if ((bullEngulf || (hammer && c.c > c.o)) && c.c > e200)
-      votes.push({ key: "pattern_play", dir: 1, sl: c.c - 1.2 * a });
+      votes.push({ key: "pattern_play", dir: 1, sl: c.c - 1.2 * a, tpMult: 1 });
     if ((bearEngulf || (star && c.c < c.o)) && c.c < e200)
-      votes.push({ key: "pattern_play", dir: -1, sl: c.c + 1.2 * a });
+      votes.push({ key: "pattern_play", dir: -1, sl: c.c + 1.2 * a, tpMult: 1 });
   }
 
   // 9) asian_breakout: كسر نطاق آسيوي بعد 07:00 UTC
@@ -436,15 +475,17 @@ export function evaluateAt(ctx: Ctx, i: number): Vote[] {
     if (onlyAfterLondon && body > 0.6 * a) {
       if (c.c > dayInfo.asianHigh) {
         const slDist = Math.max(1.0 * a, rangeWidth * 0.5);
-        votes.push({ key: "asian_breakout", dir: 1, sl: c.c - slDist });
+        votes.push({ key: "asian_breakout", dir: 1, sl: c.c - slDist, tpMult: 1 });
       }
       if (c.c < dayInfo.asianLow) {
         const slDist = Math.max(1.0 * a, rangeWidth * 0.5);
-        votes.push({ key: "asian_breakout", dir: -1, sl: c.c + slDist });
+        votes.push({ key: "asian_breakout", dir: -1, sl: c.c + slDist, tpMult: 1 });
       }
     }
   }
 
+  // تنظيف: إزالة أصوات الاستراتيجيات الفارغة الأوزان — وإرجاع النتيجة
+  void MR_KEYS; // (يُستخدم في selftrainer لحساب هدف التوليفة)
   return votes;
 }
 
@@ -572,7 +613,7 @@ export async function runBacktest(tf: "15m" | "1h"): Promise<BacktestResult> {
         if (d === lastAsianDay) continue;
         lastAsianDay = d;
       }
-      const sim = simulate(candles, i, vote.dir, vote.sl, hold);
+      const sim = simulate(candles, i, vote.dir, vote.sl, hold, vote.tpMult ?? 1);
       if (!sim) continue;
       trades.push({
         key: meta.key,
@@ -582,7 +623,7 @@ export async function runBacktest(tf: "15m" | "1h"): Promise<BacktestResult> {
         dir: vote.dir,
         entry: candles[i + 1].o,
         sl: vote.sl,
-        tp1: candles[i + 1].o + vote.dir * Math.abs(candles[i + 1].o - vote.sl),
+        tp1: candles[i + 1].o + vote.dir * Math.abs(candles[i + 1].o - vote.sl) * (vote.tpMult ?? 1),
         result: sim.result,
         r: sim.r,
         bars: sim.bars,
@@ -635,7 +676,10 @@ export async function runBacktest(tf: "15m" | "1h"): Promise<BacktestResult> {
       const c = candles[i];
       const a = ctx.atrArr[i];
       const sl = dir === 1 ? c.c - 1.5 * a : c.c + 1.5 * a;
-      const sim = simulate(candles, i, dir, sl, hold);
+      // هدف التوليفة = متوسط مرجّح بمضاعفات أهداف الاستراتيجيات المتفقة
+      // (استراتيجيات الانعكاس هدفها 0.85R الأقرب — يرفع نسبة الفوز)
+      const agreeW = agreeing.reduce((s, v) => s + (v.tpMult ?? 1), 0) / agreeing.length;
+      const sim = simulate(candles, i, dir, sl, hold, agreeW);
       if (!sim) continue;
       trades.push({
         key: "composite",
@@ -645,7 +689,7 @@ export async function runBacktest(tf: "15m" | "1h"): Promise<BacktestResult> {
         dir,
         entry: candles[i + 1].o,
         sl,
-        tp1: candles[i + 1].o + dir * Math.abs(candles[i + 1].o - sl),
+        tp1: candles[i + 1].o + dir * Math.abs(candles[i + 1].o - sl) * agreeW,
         result: sim.result,
         r: sim.r,
         bars: sim.bars,

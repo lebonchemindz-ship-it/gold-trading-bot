@@ -1,7 +1,7 @@
 "use client";
 
 // ============================================================
-// لوحة التدريب الذاتي العميق — 6 أشهر
+// لوحة التدريب الذاتي العميق — سنة كاملة
 // تجسيد حرفي لطلب المستخدم:
 //   يتنبأ دون رؤية النتيجة ← يكشفها ← يتحقق ← يفسّر لنفسه
 //   لماذا أصاب/أخطأ ← يعدّل أوزانه ← يعيد الحلقة
@@ -118,7 +118,7 @@ function MiniBar({ pct, tone = "gold" }: { pct: number; tone?: "gold" | "good" |
 }
 
 const RUNNING_STEPS = [
-  "يجمع شموع 6 أشهر من السوق…",
+  "يجمع شموع سنة كاملة من السوق…",
   "يمشي شمعة شمعة — يتنبأ دون رؤية النتيجة…",
   "يكشف النتيجة ويتحقق: أصاب أم أخطأ؟",
   "يحلل أخطاءه ويكتب لنفسه الدروس…",
@@ -445,7 +445,7 @@ export function TrainerPanel({
             </div>
             <div>
               <h2 className="text-base font-black text-zinc-50 leading-tight">
-                حلقة التدريب الذاتي العميق — 6 أشهر
+                حلقة التدريب الذاتي العميق — سنة كاملة
               </h2>
               <p className="text-[11px] text-zinc-500 mt-0.5 leading-relaxed max-w-xl">
                 يتنبأ على كل شمعة تاريخية <b className="text-amber-400/90">دون رؤية النتيجة</b> ← يكشفها ويتحقق ←
@@ -527,7 +527,7 @@ export function TrainerPanel({
         {!result && !running && !error && (
           <div className="py-10 text-center">
             <BrainCircuit className="w-10 h-10 text-zinc-700 mx-auto mb-3" />
-            <p className="text-sm text-zinc-500">البوت لم يتدرب بعد في هذه الجلسة — اضغط «ابدأ تدريب البوت» ليتعلم من 6 أشهر سابقة</p>
+            <p className="text-sm text-zinc-500">البوت لم يتدرب بعد في هذه الجلسة — اضغط «ابدأ تدريب البوت» ليتعلم من سنة كاملة سابقة</p>
           </div>
         )}
 
@@ -545,7 +545,7 @@ export function TrainerPanel({
             {/* --- مؤشرات الأداء --- */}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
               <KpiCard
-                label="دقة التنبؤ الأعمى (6 أشهر)"
+                label="دقة التنبؤ الأعمى (سنة كاملة)"
                 value={`${result.selfKnowledge.blindAccuracy}%`}
                 sub={`${result.selfKnowledge.totalPredictions} توقعاً أعمى`}
                 tone={result.selfKnowledge.blindAccuracy >= 55 ? "good" : result.selfKnowledge.blindAccuracy >= 45 ? "neutral" : "bad"}
