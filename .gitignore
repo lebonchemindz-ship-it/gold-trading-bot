@@ -55,7 +55,8 @@ server.log
 
 # Project-private artifacts (research, uploads, sandbox infra)
 /upload/
-/scripts/
+/scripts/*
+!/scripts/monitor.py
 /download/
 /.zscripts/
 /examples/

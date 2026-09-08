@@ -18,6 +18,7 @@ import { MarketClock } from "@/components/gold-bot/market-clock";
 import { NewsPanel, type NewsData } from "@/components/gold-bot/news-panel";
 import { BacktestPanel } from "@/components/gold-bot/backtest-panel";
 import { TrainerPanel } from "@/components/gold-bot/trainer-panel";
+import { TradesHistoryPanel } from "@/components/gold-bot/trades-history";
 import { getSessionInfo } from "@/lib/engine/sessions";
 import type { SignalResponse, SessionInfo } from "@/lib/engine/types";
 import type { BacktestResult } from "@/lib/engine/backtest";
@@ -494,6 +495,11 @@ export default function GoldBotPage() {
                       خريطة المستويات الهيكلية
                     </h2>
                     <LevelsPanel signal={signal} />
+                  </div>
+
+                  {/* سجل الصفقات الآلي — يعمل المراقب حتى وأنت offline */}
+                  <div className="mt-5">
+                    <TradesHistoryPanel />
                   </div>
 
                   {/* لوحة الأخبار والأحداث — تُحدَّث مع كل ضغطة تحديث */}
