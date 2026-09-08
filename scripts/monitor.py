@@ -87,18 +87,62 @@ def fetch_signal(retries: int = 2) -> dict:
     raise RuntimeError(f"تعذر جلب الإشارة من الموقع: {last_err}")
 
 
-def send_tg(text: str) -> None:
-    if not TG_TOKEN or not TG_CHAT:
+def send_tg(text: str, chat_id: str = "") -> bool:
+    target = (chat_id or TG_CHAT).strip()
+    if not TG_TOKEN or not target:
         print("[تيليجرام] غير مُكوَّن — تم تخطي الإشعار (الصفقة محفوظة في السجل)")
-        return
+        return False
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-    body = json.dumps({"chat_id": TG_CHAT, "text": text}).encode("utf-8")
+    body = json.dumps({"chat_id": target, "text": text}).encode("utf-8")
     req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=20) as r:
             print(f"[تيليجرام] ✓ أُرسل الإشعار ({r.status})")
+            return True
     except Exception as e:  # noqa: BLE001
         print(f"[تيليجرام] ✗ فشل الإرسال: {e}", file=sys.stderr)
+    return False
+
+
+def discover_chat_id() -> dict | None:
+    """اكتشاف تلقائي لمعرف المحادثة من آخر الرسائل الواصلة للبوت.
+    يتطلب أن يكون المستخدم قد أرسل /start للبوت مرة واحدة."""
+    if not TG_TOKEN:
+        return None
+    try:
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{TG_TOKEN}/getUpdates",
+            headers={"User-Agent": "gold-bot-monitor/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as r:
+            result = (json.load(r) or {}).get("result") or []
+    except Exception as e:  # noqa: BLE001
+        print(f"[تيليجرام] تعذر جلب الرسائل للاكتشاف: {e}", file=sys.stderr)
+        return None
+    for u in reversed(result):  # الأحدث أولاً
+        chat = (u.get("message") or {}).get("chat") or {}
+        if chat.get("type") == "private" and chat.get("id"):
+            return {
+                "chatId": str(chat["id"]),
+                "username": chat.get("username") or chat.get("first_name") or "",
+            }
+    return None
+
+
+def resolve_tg_chat(data: dict) -> str:
+    """معرف المحادثة: من السر أولاً، ثم السجل المحفوظ، ثم اكتشاف تلقائي"""
+    if TG_CHAT:
+        data.setdefault("telegram", {})["chatId"] = TG_CHAT
+        return TG_CHAT
+    tg = data.setdefault("telegram", {})
+    if tg.get("chatId"):
+        return tg["chatId"]
+    found = discover_chat_id()
+    if found:
+        tg.update(found)
+        tg["linkedAt"] = iso_now()
+        return tg["chatId"]
+    return ""
 
 
 # ---------- التخزين ----------
@@ -115,7 +159,8 @@ def load_trades() -> dict:
         "lastSignalAt": None,
         "lastSignalDir": None,
         "lastLossAt": None,
-        "telegramEnabled": bool(TG_TOKEN and TG_CHAT),
+        "telegram": {},
+        "telegramEnabled": False,
         "trades": [],
     }
 
@@ -314,7 +359,21 @@ def main() -> int:
     print(f"=== مراقب بوت الذهب — {iso_now()} ===")
     sig = fetch_signal()
     data = load_trades()
-    data["telegramEnabled"] = bool(TG_TOKEN and TG_CHAT)
+
+    # ربط تيليجرام: سر، أو محفوظ، أو اكتشاف تلقائي (أول /start من المستخدم)
+    tg = data.setdefault("telegram", {})
+    had_chat = bool(tg.get("chatId"))
+    chat = resolve_tg_chat(data)
+    newly_linked = bool(chat) and not had_chat
+    if newly_linked:
+        print(f"[تيليجرام] ✓ ربط ناجح: {tg.get('username') or tg.get('chatId')}")
+        send_tg(
+            "✅ تم ربط تيليجرام — البوت الآلي يعمل الآن على مدار الساعة\n"
+            "📩 سيصلك إشعار فوري عند: فتح صفقة جديدة · تحقق الهدف 🎯 · لمس الوقف 🛑\n"
+            "📜 سجل الصفقات: https://gold-trading-bot-omega.vercel.app",
+            chat,
+        )
+    data["telegramEnabled"] = bool(TG_TOKEN and chat)
 
     session = sig.get("session") or {}
     print(
@@ -326,7 +385,7 @@ def main() -> int:
     events.extend(check_open_trades(data, sig))
     events.extend(try_open_trade(data, sig))
 
-    changed = bool(events)
+    changed = bool(events) or newly_linked
     heartbeat_due = hours_since(data.get("lastCheckedAt")) >= HEARTBEAT_H
 
     if changed or heartbeat_due:
@@ -341,7 +400,7 @@ def main() -> int:
     for msg in events:
         print("— إشعار —")
         print(msg)
-        send_tg(msg)
+        send_tg(msg, chat)
 
     print("=== انتهى ===")
     return 0
