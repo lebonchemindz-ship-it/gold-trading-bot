@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { RefreshCw, Radio, TrendingUp, TrendingDown, Coins, AlertTriangle, Github, Globe, BrainCircuit, GraduationCap } from "lucide-react";
+import { RefreshCw, Radio, TrendingUp, TrendingDown, Coins, AlertTriangle, Github, Globe, BrainCircuit, GraduationCap, Sparkles, Pause, ChevronDown } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -259,6 +259,9 @@ export default function GoldBotPage() {
   const price = signal?.price;
   const changePct = signal?.change24hPct ?? 0;
   const up = changePct >= 0;
+  const dir = signal?.direction ?? "WAIT";
+  const isBuy = dir === "BUY";
+  const isSell = dir === "SELL";
   const trainingApplied = signal?.training?.applied ?? false;
   const stripSession = liveSession ?? signal?.session ?? null;
   void tfOf;
@@ -393,6 +396,97 @@ export default function GoldBotPage() {
           </div>
         )}
 
+        {/* ===== شريط توقع اليوم — أول ما تراه ===== */}
+        {signal ? (
+          <section
+            aria-label="توقع اليوم ونسبته"
+            className="rounded-2xl border-2 border-amber-500/40 bg-gradient-to-l from-amber-500/[0.1] via-[#101013] to-[#101013] px-4 py-4 shadow-lg shadow-amber-500/10 scroll-mt-24"
+          >
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-4">
+              {/* الاتجاه */}
+              <div className="flex items-center gap-3">
+                <span className="text-[11px] font-bold text-amber-300 flex items-center gap-1.5 shrink-0">
+                  <Sparkles className="w-4 h-4" />
+                  توقع {mode === "scalping" ? "السكالبينج" : "اليوم"}
+                </span>
+                <div
+                  className={cn(
+                    "text-2xl font-black px-4 py-1.5 rounded-xl border flex items-center gap-2 shrink-0",
+                    isBuy
+                      ? "text-emerald-400 border-emerald-500/40 bg-emerald-500/10"
+                      : isSell
+                        ? "text-rose-400 border-rose-500/40 bg-rose-500/10"
+                        : "text-amber-400 border-amber-500/40 bg-amber-500/10"
+                  )}
+                >
+                  {isBuy && <TrendingUp className="w-6 h-6" />}
+                  {isSell && <TrendingDown className="w-6 h-6" />}
+                  {dir === "WAIT" && <Pause className="w-5 h-5" />}
+                  {dir === "BUY" ? "شراء" : dir === "SELL" ? "بيع" : "انتظار"}
+                </div>
+              </div>
+
+              {/* نسبة الثقة */}
+              <div className="flex items-center gap-2.5 shrink-0">
+                <div className="flex flex-col leading-none">
+                  <span className="text-[10px] text-zinc-400 mb-1">نسبة الثقة (احتمال الفوز)</span>
+                  <span
+                    className={cn(
+                      "text-3xl font-black tabular-nums",
+                      signal.confidence >= 75 ? "text-emerald-400" : signal.confidence >= 60 ? "text-amber-300" : "text-zinc-300"
+                    )}
+                    dir="ltr"
+                  >
+                    {signal.confidence}%
+                  </span>
+                </div>
+                <span className="text-[10px] text-zinc-400 max-w-[160px] leading-snug hidden sm:block">
+                  {signal.confidenceLabel}
+                </span>
+              </div>
+
+              {/* مستويات الصفقة أو سبب الانتظار */}
+              {signal.levels ? (
+                <div className="flex items-center gap-2 flex-wrap" dir="ltr">
+                  <span className="rounded-lg border border-zinc-700 bg-zinc-900/70 px-2.5 py-1.5 text-[11px] text-zinc-200 flex items-center gap-1.5">
+                    <span className="text-[9px] text-zinc-400">الدخول</span>
+                    <b className="text-amber-300 tabular-nums">${signal.levels.entry}</b>
+                  </span>
+                  <span className="rounded-lg border border-rose-500/30 bg-rose-500/5 px-2.5 py-1.5 text-[11px] flex items-center gap-1.5">
+                    <span className="text-[9px] text-zinc-400">الوقف</span>
+                    <b className="text-rose-400 tabular-nums">${signal.levels.sl}</b>
+                  </span>
+                  <span className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-2.5 py-1.5 text-[11px] flex items-center gap-1.5">
+                    <span className="text-[9px] text-zinc-400">هدف ١</span>
+                    <b className="text-emerald-400 tabular-nums">${signal.levels.tp1}</b>
+                  </span>
+                </div>
+              ) : (
+                <span className="text-[11px] text-zinc-300 max-w-[260px] leading-snug">
+                  {stripSession && stripSession.quality === 0
+                    ? "السوق مغلق الآن — التوقع يعود فور فتح الجلسة"
+                    : "لا صفقة الآن: الدرجة دون عتبة الدخول — انتظر اكتمال الشروط"}
+                </span>
+              )}
+
+              {/* التفاصيل */}
+              <a
+                href="#prediction-card"
+                onClick={(e) => {
+                  e.preventDefault();
+                  document.getElementById("prediction-card")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }}
+                className="ms-auto shrink-0 text-[11px] font-bold text-amber-300 border border-amber-500/40 bg-amber-500/10 rounded-lg px-3 py-2 flex items-center gap-1 hover:bg-amber-500/20 transition-colors"
+              >
+                التفاصيل الكاملة
+                <ChevronDown className="w-3.5 h-3.5" />
+              </a>
+            </div>
+          </section>
+        ) : (
+          <Skeleton className="h-20 w-full rounded-2xl" />
+        )}
+
         {/* ساعة السوق — فتح/غلق + الجلسات */}
         <MarketClock />
 
@@ -458,7 +552,7 @@ export default function GoldBotPage() {
                 <TabsContent value={mode} className="mt-5">
                   <div className="grid gap-5 lg:grid-cols-[1.05fr_0.95fr] items-start">
                     {/* العمود الأيمن: التوصية + الأعمدة */}
-                    <div className="flex flex-col gap-5 min-w-0">
+                    <div className="flex flex-col gap-5 min-w-0 scroll-mt-24" id="prediction-card">
                       <SignalCard signal={signal} />
                       <div>
                         <h2 className="text-sm font-bold text-zinc-300 mb-2.5 flex items-center gap-2">

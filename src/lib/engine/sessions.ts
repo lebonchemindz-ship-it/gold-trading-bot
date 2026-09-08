@@ -48,12 +48,13 @@ export const SESSION_DEFS = [
   { key: "newyork", nameAr: "نيويورك", tz: "America/New_York", open: 8, close: 17 },
 ] as const;
 
-/** هل السوق مغلق لعطلة نهاية الأسبوع؟ (بساعة نيويورك — دقيق مع DST) */
+/** هل السوق مغلق لعطلة نهاية الأسبوع؟ (بساعة نيويورك — دقيق مع DST)
+ *  السوق يفتح الأحد 17:00 ET (XAU/USD أوتوماتيك مع فتح الفوركس الأسبوعي)
+ *  و ُيغلق الجمعة 17:00 ET — أي أن «الأحد بعد 17:00» سوق مفتوح! */
 export function isMarketWeekend(d: Date): boolean {
   const ny = localParts(d, "America/New_York");
   return (
     ny.weekday === "Sat" ||
-    ny.weekday === "Sun" ||
     (ny.weekday === "Fri" && ny.h >= 17) ||
     (ny.weekday === "Sun" && ny.h < 17)
   );

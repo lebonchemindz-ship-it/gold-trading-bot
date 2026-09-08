@@ -526,7 +526,7 @@ export function TrainerPanel({
 
         {!result && !running && !error && (
           <div className="py-10 text-center">
-            <BrainCircuit className="w-10 h-10 text-zinc-700 mx-auto mb-3" />
+            <BrainCircuit className="w-10 h-10 text-zinc-400 mx-auto mb-3" />
             <p className="text-sm text-zinc-400">البوت لم يتدرب بعد في هذه الجلسة — اضغط «ابدأ تدريب البوت» ليتعلم من سنة كاملة سابقة</p>
           </div>
         )}

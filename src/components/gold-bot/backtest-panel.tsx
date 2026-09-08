@@ -265,7 +265,7 @@ function WeightsBars({ base, learned }: { base: Record<string, number>; learned:
               <span className="text-zinc-400">{PILLAR_AR[k]}</span>
               <span className="tabular-nums" dir="ltr">
                 <span className="text-zinc-400">{b}</span>
-                <span className="text-zinc-700"> → </span>
+                <span className="text-zinc-300"> → </span>
                 <span className={up ? "text-emerald-400 font-bold" : down ? "text-rose-400 font-bold" : "text-zinc-300"}>
                   {l}
                 </span>
