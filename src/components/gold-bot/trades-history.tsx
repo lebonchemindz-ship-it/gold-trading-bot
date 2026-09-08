@@ -122,7 +122,7 @@ export function TradesHistoryPanel() {
                 سجل الصفقات الآلي — يعمل حتى وأنت نائم 😴
               </h2>
               <p className="text-[11px] text-zinc-300 mt-0.5 leading-relaxed max-w-xl">
-                مراقب تلقائي يفحص السوق كل 10 دقائق، يفتح صفقة عند إشارة قوية (ثقة 65%+)
+                مراقب تلقائي يفحص السوق كل 5 دقائق، يفتح صفقة عند إشارة قوية (ثقة 65%+)
                 ويتتبعها حتى تلمس الهدف أو الوقف — النتيجة تُحفظ هنا وترسل لك على تيليجرام
               </p>
             </div>
@@ -134,12 +134,22 @@ export function TradesHistoryPanel() {
                 <BellRing className="w-3 h-3" /> إشعارات تيليجرام مفعّلة
               </Badge>
             ) : (
-              <Badge variant="outline" className="text-[10px] gap-1 border-zinc-700 text-zinc-400 bg-zinc-900">
-                <BellOff className="w-3 h-3" /> تيليجرام غير مفعّل بعد
-              </Badge>
+              <a
+                href="https://t.me/Goldzabaza23bot"
+                target="_blank"
+                rel="noreferrer"
+                title="افتح المحادثة وأرسل /start"
+              >
+                <Badge
+                  variant="outline"
+                  className="text-[10px] gap-1 border-zinc-700 text-zinc-300 bg-zinc-900 hover:border-amber-500/50 hover:text-amber-300 transition-colors cursor-pointer"
+                >
+                  <BellOff className="w-3 h-3" /> فعّل الإشعارات — أرسل /start للبوت
+                </Badge>
+              </a>
             )}
             <Badge variant="outline" className="text-[10px] gap-1 border-amber-500/40 text-amber-300 bg-amber-500/5">
-              <Radar className="w-3 h-3" /> فحص كل 10 دقائق
+              <Radar className="w-3 h-3" /> فحص كل 5 دقائق
             </Badge>
             {data?.lastCheckedAt && (
               <span className="text-[10px] text-zinc-400 flex items-center gap-1 tabular-nums">

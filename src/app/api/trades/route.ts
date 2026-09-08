@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 // ============================================================
 // سجل الصفقات الآلي — يقرأ data/trades.json من مستودع GitHub
-// المراقب (GitHub Actions) يحدّثه كل 10 دقائق حتى وأنت offline
+// المراقب (GitHub Actions) يحدّثه كل 5 دقائق حتى وأنت offline
 // ============================================================
 
 export const dynamic = "force-dynamic";
@@ -56,7 +56,7 @@ export async function GET() {
       updatedAt: raw.updatedAt ?? null,
       lastCheckedAt: raw.lastCheckedAt ?? null,
       telegramEnabled: Boolean(raw.telegramEnabled),
-      monitorInterval: "كل 10 دقائق (GitHub Actions)",
+      monitorInterval: "كل 5 دقائق (GitHub Actions)",
       stats: {
         total: trades.length,
         open: trades.length - closed.length,
