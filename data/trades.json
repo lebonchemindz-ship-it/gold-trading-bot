@@ -1,10 +1,14 @@
 {
-  "updatedAt": null,
-  "lastCheckedAt": "2026-09-08T23:43:53Z",
+  "updatedAt": "2026-09-09T00:32:35Z",
+  "lastCheckedAt": "2026-09-09T00:32:35Z",
   "lastSignalAt": null,
   "lastSignalDir": null,
   "lastLossAt": null,
-  "telegramEnabled": false,
+  "telegramEnabled": true,
   "trades": [],
-  "telegram": {}
+  "telegram": {
+    "chatId": "5151938275",
+    "username": "Adlen",
+    "linkedAt": "2026-09-09T00:32:35Z"
+  }
 }
