@@ -1,7 +1,7 @@
 {
-  "updatedAt": "2026-09-10T12:42:20Z",
-  "lastCheckedAt": "2026-09-10T15:49:40Z",
-  "lastSignalAt": "2026-09-10T12:26:50Z",
+  "updatedAt": "2026-09-10T16:16:25Z",
+  "lastCheckedAt": "2026-09-10T16:16:25Z",
+  "lastSignalAt": "2026-09-10T16:16:25Z",
   "lastSignalDir": "SELL",
   "lastLossAt": "2026-09-10T12:42:20Z",
   "telegramEnabled": true,
@@ -45,6 +45,26 @@
       "closedAt": "2026-09-10T12:42:20Z",
       "closePrice": 4436.0,
       "resultR": -1.0
+    },
+    {
+      "id": "t1789056985-ad50eb",
+      "openedAt": "2026-09-10T16:16:25Z",
+      "mode": "day",
+      "direction": "SELL",
+      "entry": 4408,
+      "sl": 4433.95,
+      "tp1": 4378.15,
+      "tp2": 4349.1,
+      "tp3": 4329.2,
+      "riskUsd": 25.95,
+      "confidence": 60,
+      "score": -18.29,
+      "fingerprint": "116a06ab7bb5bef2",
+      "sessionLabel": "جلسة نيويورك — تأثير الأخبار والبيانات الأمريكية مرتفع",
+      "status": "open",
+      "closedAt": null,
+      "closePrice": null,
+      "resultR": null
     }
   ],
   "telegram": {
