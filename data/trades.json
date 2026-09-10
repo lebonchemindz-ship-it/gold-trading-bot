@@ -1,11 +1,32 @@
 {
-  "updatedAt": "2026-09-09T00:32:35Z",
-  "lastCheckedAt": "2026-09-10T04:09:32Z",
-  "lastSignalAt": null,
-  "lastSignalDir": null,
+  "updatedAt": "2026-09-10T05:50:36Z",
+  "lastCheckedAt": "2026-09-10T05:50:36Z",
+  "lastSignalAt": "2026-09-10T05:50:36Z",
+  "lastSignalDir": "BUY",
   "lastLossAt": null,
   "telegramEnabled": true,
-  "trades": [],
+  "trades": [
+    {
+      "id": "t1789019436-7ae2b1",
+      "openedAt": "2026-09-10T05:50:36Z",
+      "mode": "day",
+      "direction": "BUY",
+      "entry": 4466.4,
+      "sl": 4445.16,
+      "tp1": 4495.3,
+      "tp2": 4511.27,
+      "tp3": 4525.86,
+      "riskUsd": 21.24,
+      "confidence": 59,
+      "score": 18.46,
+      "fingerprint": "4d83403598872e10",
+      "sessionLabel": "جلسة آسيوية — تراكم وتذبذب ضيق (نطاق بناء السيولة)",
+      "status": "open",
+      "closedAt": null,
+      "closePrice": null,
+      "resultR": null
+    }
+  ],
   "telegram": {
     "chatId": "5151938275",
     "username": "Adlen",
