@@ -1,8 +1,8 @@
 {
-  "updatedAt": "2026-09-10T05:56:57Z",
-  "lastCheckedAt": "2026-09-10T12:07:03Z",
-  "lastSignalAt": "2026-09-10T05:50:36Z",
-  "lastSignalDir": "BUY",
+  "updatedAt": "2026-09-10T12:26:50Z",
+  "lastCheckedAt": "2026-09-10T12:26:50Z",
+  "lastSignalAt": "2026-09-10T12:26:50Z",
+  "lastSignalDir": "SELL",
   "lastLossAt": "2026-09-10T05:56:57Z",
   "telegramEnabled": true,
   "trades": [
@@ -25,6 +25,26 @@
       "closedAt": "2026-09-10T05:56:57Z",
       "closePrice": 4445.2,
       "resultR": -1.0
+    },
+    {
+      "id": "t1789043210-764999",
+      "openedAt": "2026-09-10T12:26:50Z",
+      "mode": "day",
+      "direction": "SELL",
+      "entry": 4413.7,
+      "sl": 4436.04,
+      "tp1": 4379.61,
+      "tp2": 4373.48,
+      "tp3": 4349.1,
+      "riskUsd": 22.34,
+      "confidence": 61,
+      "score": -18.92,
+      "fingerprint": "b772a73f10e8a65d",
+      "sessionLabel": "تداخل لندن ونيويورك — ذروة السيولة والحركة الاتجاهية (أفضل وقت للتداول)",
+      "status": "open",
+      "closedAt": null,
+      "closePrice": null,
+      "resultR": null
     }
   ],
   "telegram": {
