@@ -29,12 +29,16 @@ TRADES_FILE = Path("data/trades.json")
 TG_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 
-MIN_CONFIDENCE = int(os.environ.get("MIN_CONFIDENCE", "55"))  # الحد الأدنى للثقة (محرك الإشارات يعطي 58-70% للإشارات القابلة للتنفيذ)
-MIN_SESSION_QUALITY = 25   # جودة جلسة دنيا (تجنب الساعات الميتة)
-MAX_OPEN_TRADES = 2        # أقصى صفقات متزامنة
+# ==== بوابات الجودة الصارمة (v2 — بعد تحليل خسارتين حيّتين بتاريخ 2026-09-10) ====
+# الخسارتان دخلتا بثقة 59% و61% من جلسة الآسيوية/أخبار — هذه البوابات تمنع تكرارهما:
+MIN_CONFIDENCE = int(os.environ.get("MIN_CONFIDENCE", "70"))   # كان 55 — الصفقتان الخاسرتان كانتا 59/61%
+MIN_SESSION_QUALITY = int(os.environ.get("MIN_SESSION_QUALITY", "50"))  # لندن/نيويورك فقط — الجلسة الآسيوية قتلت الصفقة الأولى
+MIN_CONFLUENCE = int(os.environ.get("MIN_CONFLUENCE", "3"))     # 3 أعمدة قوية متفقة على الأقل (عمق التوافق)
+MIN_ADX = int(os.environ.get("MIN_ADX", "18"))                  # سوق له اتجاه فعلي
+MAX_OPEN_TRADES = 1        # صفقة واحدة في كل مرة — تركيز كامل
 MAX_PER_DIRECTION = 1      # أقصى صفقة واحدة لكل اتجاه
-SAME_DIR_COOLDOWN_H = 3.0  # ساعات بين صفقتين بنفس الاتجاه
-LOSS_COOLDOWN_H = 2.0      # توقف بعد خسارة
+SAME_DIR_COOLDOWN_H = 4.0  # ساعات بين صفقتين بنفس الاتجاه
+LOSS_COOLDOWN_H = 8.0      # توقف 8 ساعات بعد خسارة (كانت 2 — قصيرة جداً)
 TRADE_TIMEOUT_H = 26.0     # إغلاق زمني
 HEARTBEAT_H = 3.0          # تحديث «آخر فحص» كل 3 ساعات حتى لو لا تغييرات
 
@@ -215,7 +219,7 @@ def new_trade_message(t: dict) -> str:
     emoji = "🟢" if t["direction"] == "BUY" else "🔴"
     lines = [
         f"{emoji} صفقة ذهب جديدة — {dir_ar} XAU/USD",
-        f"🎯 الثقة: {t['confidence']}% | الدرجة: {'+' if (t.get('score') or 0) >= 0 else ''}{t.get('score')}",
+        f"🎯 الثقة: {t['confidence']}% | الدرجة: {'+' if (t.get('score') or 0) >= 0 else ''}{t.get('score')} | توافق {t.get('confluence', '-')}/7 أعمدة",
         f"💰 الدخول: {t['entry']}$",
         f"🛑 الوقف: {t['sl']}$ (خطر {t['riskUsd']}$)",
         f"🎯 الأهداف: {t['tp1']}$ / {t['tp2']}$ / {t['tp3']}$",
@@ -292,7 +296,8 @@ def check_open_trades(data: dict, sig: dict) -> list:
 
 
 def try_open_trade(data: dict, sig: dict) -> list:
-    """فتح صفقة جديدة إذا توفرت إشارة قوية. يعيد رسالة الصفقة الجديدة."""
+    """فتح صفقة جديدة فقط عند إشارة استثنائية تعبر كل البوابات الصارمة.
+    يعيد رسالة الصفقة الجديدة (أو قائمة فارغة)."""
     direction = sig.get("direction")
     levels = sig.get("levels")
     if direction not in ("BUY", "SELL") or not levels:
@@ -303,12 +308,53 @@ def try_open_trade(data: dict, sig: dict) -> list:
     if market_closed:
         return []
 
+    # ===== البوابة 1: الثقة العالية (الخسارتان السابقتان كانتا 59/61%) =====
     confidence = sig.get("confidence") or 0
     if confidence < MIN_CONFIDENCE:
         if direction != "WAIT":
-            print(f"[رفض] إشارة {direction} بثقة {confidence}% — الحد الأدنى {MIN_CONFIDENCE}%")
+            print(f"[رفض] إشارة {direction} بثقة {confidence}% — المطلوب {MIN_CONFIDENCE}% (بوابة الجودة 1)")
         return []
-    if (session.get("quality") or 0) < MIN_SESSION_QUALITY:
+
+    # ===== البوابة 2: جلسة سيولة عالية فقط — لندن/نيويورك (الجلسة الآسيوية قتلت الصفقة الأولى) =====
+    quality = session.get("quality") or 0
+    if quality < MIN_SESSION_QUALITY:
+        print(f"[رفض] جودة الجلسة {quality} — المطلوب {MIN_SESSION_QUALITY} (لندن/نيويورك فقط، بوابة 2)")
+        return []
+
+    # ===== البوابة 3: عمق التوافق — 3 أعمدة قوية متفقة على الأقل =====
+    confluence = sig.get("confluence") or 0
+    if confluence < MIN_CONFLUENCE:
+        print(f"[رفض] توافق ضحل: {confluence} أعمدة قوية — المطلوب {MIN_CONFLUENCE} (بوابة 3)")
+        return []
+
+    # ===== البوابة 4: سوق له اتجاه (ADX) — لا تداول في السوق الميت =====
+    adx = sig.get("adx") or 0
+    if adx < MIN_ADX:
+        print(f"[رفض] ADX={adx} — سوق بلا اتجاه واضح، المطلوب {MIN_ADX} (بوابة 4)")
+        return []
+
+    # ===== البوابة 5: حرس الدخول — لا شراء وسط انهيار ولا بيع وسط صعود =====
+    guard = sig.get("entryGuard") or {}
+    if guard.get("ok") is False:
+        print(f"[رفض] حرس الدخول: {guard.get('reason') or 'زخم معاكس عنيف'} (بوابة 5)")
+        return []
+
+    # ===== البوابة 6: حظر الأخبار عالية التأثير — التقلب المفاجئ يضرب الوقف =====
+    news = sig.get("news") or {}
+    if news.get("caution"):
+        print(f"[رفض] خبر عالي التأثير قادم/حديث — تأجيل الدخول (بوابة 6): {(news.get('cautionText') or '')[:80]}")
+        return []
+
+    # ===== البوابة 7: نسبة عائد/مخاطرة سليمة =====
+    rr1 = (levels.get("rr1") or 0)
+    if rr1 < 0.9:
+        print(f"[رفض] عائد/مخاطرة TP1 = {rr1} — أقل من 0.9 (بوابة 7)")
+        return []
+
+    # ===== البوابة 8: توسع التقلب — ATR الحالي فوق 1.35× متوسطه يبتلع الأوقاف =====
+    atr_exp = sig.get("atrExpansion") or 0
+    if atr_exp > 1.35:
+        print(f"[رفض] توسع تقلب خطر: ATR = {atr_exp}× متوسطه — التقلب المفاجئ يضرب الوقف (بوابة 8)")
         return []
 
     trades = data.get("trades", [])
@@ -343,6 +389,8 @@ def try_open_trade(data: dict, sig: dict) -> list:
         "riskUsd": levels.get("riskUsd"),
         "confidence": confidence,
         "score": sig.get("score"),
+        "confluence": confluence,
+        "adx": adx,
         "fingerprint": sig.get("fingerprint"),
         "sessionLabel": session.get("label", "-"),
         "status": "open",
@@ -358,7 +406,7 @@ def try_open_trade(data: dict, sig: dict) -> list:
 
 # ---------- التشغيل الرئيسي ----------
 def main() -> int:
-    print(f"=== مراقب بوت الذهب — {iso_now()} ===")
+    print(f"=== مراقب بوت الذهب v2 (بوابات صارمة) — {iso_now()} ===")
     sig = fetch_signal()
     data = load_trades()
 
@@ -378,9 +426,11 @@ def main() -> int:
     data["telegramEnabled"] = bool(TG_TOKEN and chat)
 
     session = sig.get("session") or {}
+    guard = sig.get("entryGuard") or {}
     print(
         f"السعر: {sig.get('price')} | الاتجاه: {sig.get('direction')} | "
-        f"الثقة: {sig.get('confidence')}% | الجلسة: {(session.get('label') or '-')[:60]}"
+        f"الثقة: {sig.get('confidence')}% | توافق: {sig.get('confluence')}/7 | ADX: {sig.get('adx')} | "
+        f"توسع التقلب: {sig.get('atrExpansion')}× | حرس الدخول: {'سليم' if guard.get('ok', True) else 'مانع'} | الجلسة: {(session.get('label') or '-')[:50]}"
     )
 
     events = []

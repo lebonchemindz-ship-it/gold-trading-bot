@@ -1,7 +1,7 @@
 // ============================================================
 // منسّق الإشارة — يجلب البيانات، يحلل، يقيّم، وينتج التوصية
 // Confidence = 50 + |score| × 0.45 × qualityGate (سقف 95%)
-// WAIT إذا |score| < 15
+// WAIT إذا |score| < 20 (عتبة أعمق — إشارات أقل وأجود)
 // ============================================================
 
 import { createHash } from "crypto";
@@ -140,7 +140,9 @@ function buildTradeLevels(
   supports: { price: number }[],
   resistances: { price: number }[]
 ): TradeLevels {
-  // 1) الوقف: خلف آخر سوينغ + عازل 0.5×ATR (قاعدة أبحاث: 1.5-2×ATR للذهب)
+  // 1) الوقف: خلف آخر سوينغ + عازل 0.4×ATR
+  // أرضية صلبة 1.5×ATR (مطابقة لإعدادات الباك-تيست الذي حقق 70% فوز)
+  // — الوقف الأضيق من ذلك قتله ضجيج السوق في التداول الحي
   const lookback = candles.slice(-30);
   const swingLow = Math.min(...lookback.map((c) => c.l));
   const swingHigh = Math.max(...lookback.map((c) => c.h));
@@ -151,15 +153,15 @@ function buildTradeLevels(
       ? supports.filter((s) => s.price < price).sort((a, b) => b.price - a.price)[0]?.price ?? swingLow
       : resistances.filter((r) => r.price > price).sort((a, b) => a.price - b.price)[0]?.price ?? swingHigh;
 
-  const atrStop = 1.5 * atrValue;
+  const atrStop = 1.5 * atrValue; // نفس مسافة الباك-تيست بالضبط
   let sl: number;
   if (direction === "BUY") {
-    sl = Math.min(nearestStructure - 0.3 * atrValue, price - atrStop * 0.9);
-    // لا تبعد الوقف أكثر من 2.2×ATR
-    sl = Math.max(sl, price - 2.2 * atrValue);
+    sl = Math.min(nearestStructure - 0.4 * atrValue, price - atrStop);
+    // لا تبعد الوقف أكثر من 2.4×ATR
+    sl = Math.max(sl, price - 2.4 * atrValue);
   } else {
-    sl = Math.max(nearestStructure + 0.3 * atrValue, price + atrStop * 0.9);
-    sl = Math.min(sl, price + 2.2 * atrValue);
+    sl = Math.max(nearestStructure + 0.4 * atrValue, price + atrStop);
+    sl = Math.min(sl, price + 2.4 * atrValue);
   }
 
   const riskUsd = Math.abs(price - sl);
@@ -323,18 +325,50 @@ export async function generateSignal(
   const totalWeight = pillars.reduce((a, p) => a + p.weight, 0);
   const score = pillars.reduce((a, p) => a + p.score * p.weight, 0) / totalWeight;
 
-  // 9) الاتجاه والثقة — عتبة أعلى 18 (كانت 15): إشارات أقل لكن أجود
+  // 9) الاتجاه والثقة — عتبة أعمق 20 (كانت 18): إشارات أقل لكن أجود
   // مبنية على البحث: التصفية المتشددة ترفع نسبة الفوز
   let direction: Direction = "WAIT";
-  if (score >= 18) direction = "BUY";
-  else if (score <= -18) direction = "SELL";
+  if (score >= 20) direction = "BUY";
+  else if (score <= -20) direction = "SELL";
 
   const actionable = direction !== "WAIT";
   // الثقة تتضاعف بعمق التوافق: عدد الأعمدة القوية بنفس الاتجاه يرفعها
   const strongAgree = pillars.filter((p) => Math.sign(p.score) === Math.sign(score) && Math.abs(p.score) >= 12).length;
+  const confluence = strongAgree; // عمق التوافق — يُستخدم كبوابة صلبة في المونيتور
   const confluenceBoost = 1 + Math.max(0, strongAgree - 2) * 0.06;
   const rawConfidence = 50 + Math.abs(score) * 0.45 * gate.factor * confluenceBoost;
   const confidence = Math.min(95, Math.round(rawConfidence));
+
+  // 9.5) حرس الدخول — منع «التقاط السكاكين الهابطة» (سبب خسارة الصفقة الأولى حيّاً):
+  // إذا تحرك السعر ضد اتجاه الصفقة أكثر من 1.1×ATR خلال آخر 3 شموع على إطار الدخول
+  // فالدخول الآن يعني الشراء في منتصف انهيار/البيع في منتصف صعود — نرفض وننتظر استقراراً
+  const entryGuard = { ok: true, reason: null as string | null };
+  if (actionable) {
+    const last3 = entry.candles.slice(-3);
+    if (last3.length === 3) {
+      const move = entry.price - last3[0].o; // صافي الحركة على آخر 3 شموع
+      const against = direction === "BUY" ? move < -1.1 * entry.atr.atr : move > 1.1 * entry.atr.atr;
+      if (against) {
+        entryGuard.ok = false;
+        entryGuard.reason =
+          `حرس الدخول: السعر تحرك ${Math.abs(move).toFixed(1)}$ ضد ${direction === "BUY" ? "الشراء" : "البيع"} ` +
+          `خلال آخر 3 شموع (${tfAr(entry.tf)}) أي ما يعادل ${(Math.abs(move) / entry.atr.atr).toFixed(1)}×ATR — الدخول الآن خطر، انتظر استقرار الحركة أو شمعة تأكيد`;
+      }
+    }
+  }
+  if (entryGuard.ok && actionable) {
+    const last1 = entry.candles[entry.candles.length - 1];
+    const body = Math.abs(last1.c - last1.o);
+    // شمعة حالية عنيفة ضد الاتجاه (> 0.9×ATR جسم) = إلغاء مؤقت
+    if (body > 0.9 * entry.atr.atr) {
+      const bearish = last1.c < last1.o;
+      if ((direction === "BUY" && bearish) || (direction === "SELL" && !bearish)) {
+        entryGuard.ok = false;
+        entryGuard.reason =
+          `حرس الدخول: آخر شمعة على ${tfAr(entry.tf)} عنيفة ضد الاتجاه (جسم ${body.toFixed(1)}$ ≈ ${(body / entry.atr.atr).toFixed(1)}×ATR) — انتظر إغلاقاً هادئاً أو تأكيداً`;      
+      }
+    }
+  }
 
   // 10) مستويات الصفقة
   const levels =
@@ -394,6 +428,9 @@ export async function generateSignal(
     narrative.push("الإشارات غير كافية لدخول آمن الآن — الوقوف جانباً حتى تكتمل الشروط هو قرار تداول صحيح.");
   }
   if (cautionText) narrative.push(cautionText);
+  if (actionable && !entryGuard.ok && entryGuard.reason) {
+    narrative.push("⛔ " + entryGuard.reason + ".");
+  }
   if (training.applied) {
     const st = training.stats;
     narrative.push(
@@ -446,6 +483,11 @@ export async function generateSignal(
     confidence,
     confidenceLabel,
     qualityGate: Math.round(gate.factor * 100) / 100,
+    confluence,
+    adx: Math.round(entry.adx.adx * 10) / 10,
+    adxTrending: entry.adx.trending,
+    atrExpansion: Math.round(entry.atr.expansionRatio * 100) / 100,
+    entryGuard,
     pillars: pillars.map((p) => ({ ...p, score: round2(p.score) })),
     levels,
     timeframeRows: buildTFRows(all),

@@ -133,7 +133,7 @@ export interface SelfTrainingResult {
 }
 
 // ---------- ثوابت ----------
-const MAX_EPOCHS = 8;
+const MAX_EPOCHS = 16; // v9: رُفع من 8 — تدريب أعمق بطلب المستخدم (حلقات تعلم أكثر قبل الاستقرار)
 const WARMUP_1H = 210; // EMA200 + متوسطات
 const MIN_CONVERGENCE = 0.4; // نقطة مئوية
 const AR_MONTHS = [
@@ -686,7 +686,7 @@ export async function runSelfTraining(
         top.length ? `أول تعديلات: ${top.join("، ")}.` : "لا تعديلات جوهرية بعد (عينات صغيرة)."
       }`;
     } else {
-      const delta = (st.winRate - prev.winRate) * 100;
+      const delta = st.winRate * 100 - prev.winRate; // كلاهما الآن بالنسبة المئوية
       note = `الحلقة ${e}: دقة ${r1(st.winRate * 100)}% (${delta >= 0 ? "+" : ""}${r1(delta)} نقطة عن الحلقة السابقة). ${
         top.length ? top.join("، ") + "." : "الأوزان مستقرة تقريباً."
       }`;

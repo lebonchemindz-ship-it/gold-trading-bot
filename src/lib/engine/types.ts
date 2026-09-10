@@ -200,6 +200,14 @@ export interface SignalResponse {
   confidence: number; // 0..100
   confidenceLabel: string;
   qualityGate: number; // معامل جودة السوق 0.6..1
+  confluence: number; // عدد الأعمدة القوية (|score|>=12) المتفقة مع الاتجاه — عمق التوافق
+  adx: number; // قوة الاتجاه على إطار الدخول
+  adxTrending: boolean; // ADX >= 25 (سوق اتجاهي)
+  atrExpansion: number; // ATR الحالي ÷ متوسطه — فوق 1.35 = توسع خطر يبتلع الأوقاف
+  entryGuard: {
+    ok: boolean; // هل زخم اللحظة يسمح بالدخول بأمان؟
+    reason: string | null; // سبب المنع بالعربية (إن وُجد)
+  };
   pillars: PillarScore[];
   levels: TradeLevels | null;
   timeframeRows: TFRow[];
