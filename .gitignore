@@ -57,6 +57,7 @@ server.log
 /upload/
 /scripts/*
 !/scripts/monitor.py
+!/scripts/test-monitor.py
 /download/
 /.zscripts/
 /examples/

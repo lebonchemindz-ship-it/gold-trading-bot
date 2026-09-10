@@ -29,7 +29,7 @@ TRADES_FILE = Path("data/trades.json")
 TG_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 
-MIN_CONFIDENCE = 65        # الحد الأدنى للثقة لفتح صفقة آلية
+MIN_CONFIDENCE = int(os.environ.get("MIN_CONFIDENCE", "55"))  # الحد الأدنى للثقة (محرك الإشارات يعطي 58-70% للإشارات القابلة للتنفيذ)
 MIN_SESSION_QUALITY = 25   # جودة جلسة دنيا (تجنب الساعات الميتة)
 MAX_OPEN_TRADES = 2        # أقصى صفقات متزامنة
 MAX_PER_DIRECTION = 1      # أقصى صفقة واحدة لكل اتجاه
@@ -305,6 +305,8 @@ def try_open_trade(data: dict, sig: dict) -> list:
 
     confidence = sig.get("confidence") or 0
     if confidence < MIN_CONFIDENCE:
+        if direction != "WAIT":
+            print(f"[رفض] إشارة {direction} بثقة {confidence}% — الحد الأدنى {MIN_CONFIDENCE}%")
         return []
     if (session.get("quality") or 0) < MIN_SESSION_QUALITY:
         return []
