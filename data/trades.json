@@ -1,9 +1,9 @@
 {
-  "updatedAt": "2026-09-10T05:50:36Z",
-  "lastCheckedAt": "2026-09-10T05:50:36Z",
+  "updatedAt": "2026-09-10T05:56:57Z",
+  "lastCheckedAt": "2026-09-10T05:56:57Z",
   "lastSignalAt": "2026-09-10T05:50:36Z",
   "lastSignalDir": "BUY",
-  "lastLossAt": null,
+  "lastLossAt": "2026-09-10T05:56:57Z",
   "telegramEnabled": true,
   "trades": [
     {
@@ -21,10 +21,10 @@
       "score": 18.46,
       "fingerprint": "4d83403598872e10",
       "sessionLabel": "جلسة آسيوية — تراكم وتذبذب ضيق (نطاق بناء السيولة)",
-      "status": "open",
-      "closedAt": null,
-      "closePrice": null,
-      "resultR": null
+      "status": "loss",
+      "closedAt": "2026-09-10T05:56:57Z",
+      "closePrice": 4445.2,
+      "resultR": -1.0
     }
   ],
   "telegram": {
